@@ -1,0 +1,3127 @@
+---
+title: "Stage_Jordan_Analyses_ImmunoProfiler"
+author: "J Dutel"
+date: "2024-04-15"
+output: 
+  html_document :
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+
+	message = FALSE,
+	warning = FALSE
+)
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(lubridate)
+library(survival)
+library(survminer)
+library(summarytools)
+
+library(ade4)
+library(factoextra)
+library(forcats)
+library(RColorBrewer)
+
+
+library(gtsummary)
+library(GGally)
+library(fastcluster)
+
+library(arsenal)
+
+library(reshape2)
+
+library(GenVisR)
+library(data.table)
+
+library(MOFA2)
+library(MOFAdata)
+library(data.table)
+
+date_point <- as_date("2017-02-28") # date de point de l'étude princeps Profiler 
+
+```
+
+# Préparation des données
+
+## Données cliniques
+
+```{r Préparation type de cancer, echo = FALSE}
+
+# On déclare une variable "levels_organs" qui assigne à chaque code le type de cancer associé au code
+
+levels_organs <- c(
+  
+  head_neck = "C00", 
+  head_neck = "C01", 
+  head_neck = "C02", 
+  head_neck = "C03", 
+  head_neck = "C04", 
+  head_neck = "C05",
+  head_neck = "C06", 
+  head_neck = "C07", 
+  head_neck = "C08", 
+  head_neck = "C09", 
+  head_neck = "C10", 
+  head_neck = "C11", 
+  head_neck = "C12", 
+  head_neck = "C13", 
+  head_neck = "C14", 
+  
+  others = "C15", #esophagus
+  others = "C16", #stomach
+  others = "C17", #small_bowel
+  
+  colorectal = "C18",
+  colorectal = "C19",
+  colorectal = "C20", 
+  
+  others = "C21", #anus
+  others = "C22", #liver
+  others = "C23", #biliary_tract
+  others = "C24", #biliary_tract
+  
+  pancreas = "C25",
+  
+  others = "C26", #ill-defined digestive organs
+  
+  head_neck = "C30", 
+  head_neck = "C31", 
+  head_neck = "C32", #larynx
+  
+  others = "C33", #trachea
+  
+  lung = "C34", 
+  
+  others = "C37", #thymus
+  others = "C38", #heart, mediastinum and pleura
+  others = "C39", #ill-defined sites in the respiratory system and intrathoracic organs
+  others = "C40",
+  
+  bones = "C41", #bones
+  
+  others = "C42", 
+  
+  skin = "C43", #skin
+  skin = "C44", #skin
+  
+  others = "C45", #Mésothéliome (plèvre)
+  others = "C46",
+  others = "C47", 
+  others = "C48",
+  
+  others = "C49", #other connective and soft tissue
+  
+  breast = "C50",
+  
+  female_genital = "C51", #vulve
+  female_genital = "C52", #vagina
+  female_genital = "C53", #cervix 
+  female_genital = "C54", #endometrium 
+  female_genital = "C55", #uterus
+  female_genital = "C56", #ovary
+  female_genital = "C57", #unspecified female genital organs
+  
+  others = "C58", #placenta
+  
+  male_genital = "C60", #penis
+  prostate = "C61", #prostate
+  male_genital = "C62", #testis
+  male_genital = "C63", #unspecified male genital organs
+  
+  urinary_tract = "C64", 
+  urinary_tract = "C65", 
+  urinary_tract = "C66",
+  urinary_tract = "C67",
+  urinary_tract = "C68", #unspecified urinary organs
+  
+  head_neck = "C69", #eye
+  
+  cns = "C70",
+  cns = "C71",
+  cns = "C72", 
+
+  head_neck = "C73", #thyroid gland
+  
+  urinary_tract = "C74", #adrenal gland
+  
+  others = "C75", #other endocrine glands and related structures
+  others = "C76", # other and ill-defined sites
+  
+  hematological = "C77", # lymph node
+  
+  hematological = "C81", # Hodgkin lymphoma
+  hematological = "C82",
+  hematological = "C83",
+  hematological = "C84",
+  hematological = "C85",
+  hematological = "C90",
+  hematological = "C91",
+  hematological = "C92",
+  hematological = "C95",
+  hematological = "C96")
+
+```
+
+```{r Préparation des données cliniques}
+
+### %>% équivalent au pipe, permet de chaîner les commandes
+### :: sert à accéder directement à une fonction ou un objet depuis un package spécifique (Permet de use une fonction sans avoir besoin de charger tout le package, ou d'éviter des conflits de fonction de package différent)
+
+d <- readxl::read_excel("donnees_cliniques_profiler/DATA/CONSORE/Export ConSoRe Profiler Juin 22.xlsx", sheet = "Cancer", skip = 1) %>% 
+  janitor::clean_names() %>% # Simplifier les noms des colonnes, en les convertissant en minuscules, en remplaçant les espaces par des underscores, et en éliminant ou en remplaçant les caractères spéciaux
+  filter(numero == 1) %>% # seulement le premier cancer / On garde que les lignes qui on "1" dans la colonne "numéro" / A QUOI 1 correspond ?
+  filter(date_de_debut > lubridate::as_date("1993-01-01")) %>% # seulement les diag > 1993 (début du DPI)  / as_date() convertit la string de date en un objet date
+  select(ipp, sexe, date_de_debut, diagnostics_cancer, age_au_diagnostic, date_derniere_venue, date_de_deces) %>% # On ne sélectionne que les colonnes qui nous intéressent
+  # mutate() permet de créer, supprimer ou modifier des colonnes d'un df
+  mutate(date_de_debut = lubridate::as_date(date_de_debut),
+         date_derniere_venue = lubridate::as_date(date_derniere_venue),
+         date_de_deces_consore = lubridate::as_date(date_de_deces),
+         organ_consore = forcats::fct_recode(substr(diagnostics_cancer, 1, 3), !!!levels_organs)) # On a créé une nouvelle colonne dans notre df appellé "organ_consore" dans laquelle on stocke ===> substr(diagnostics_cancer, 1, 3) : On découpe la colonne diagnostics_cancer en chaque caractère et on considère l'enchainement de caractère commencant à la position 1 jusqu'au 3e ==> Les 3 premiers caractères ==> "Cxx" / forcats::fct_recode(...) : permet de recoder les abréviations / !!!levels_organs : permet de passer un ensemble de nouvelles correspondances de noms des abréviations (définit dans levels_organs (==> levels_organs doit être une liste nommée où chaque nom représente le nouveau niveau de facteur et chaque valeur correspond au vieux niveau de facteur. Par exemple, list(NewFactor1 = "OldFactor1", NewFactor2 = "OldFactor2") )
+
+
+dprofiler_patient <- readr::read_csv(file = "donnees_cliniques_profiler/DATA/PROFILER/Patients-30-11-2020NEW.csv", na = "NULL") %>% 
+  select(dpi_id, 
+         "date_de_deces_profiler" = Patient_DeathDate, 
+         "ddn_profiler" = Patient_LastNewsDate) %>% 
+  distinct(dpi_id, .keep_all = TRUE) # Elimine les doublons dans le dataframe et ne conserve que la première occurence dechaque dpi_id ==> .keep_all permet de conserver toutes les autres colonnes que dpi_id (pour chaque dpi_id unique)
+
+dprofiler_cancer <- readr::read_csv(file = "donnees_cliniques_profiler/DATA/PROFILER/Cancer-30-11-2020NEW.csv", na = "NULL") %>% 
+  select(dpi_id, 
+         "num_inclusion" = "Patient_Id...2", 
+         "TumPathCode" = "TumorPathologyEvent_TopographyCode",
+         "date_diag_primary" = "TumorPathologyEvent_StartDate_Primary", age) %>% 
+  distinct(dpi_id, .keep_all = TRUE) %>% 
+  mutate(organ_profiler = fct_recode(substr(TumPathCode, 1, 3), !!!levels_organs))
+
+dprofiler <- left_join(dprofiler_patient, dprofiler_cancer) # Comme les données dans Profiler sotn en plusieurs fichier, on sélectionne dans chaque fichier, les colonnes qui nous intéressent et on les colle ensemble selon les dpi_id
+
+
+d_clin <- left_join(d, dprofiler, by = c("ipp" = "dpi_id")) %>% 
+  mutate(dcd_profiler = !is.na(date_de_deces_profiler), 
+         dcd_consore = !is.na(date_de_deces_consore), 
+         date_de_deces = pmin(date_de_deces_profiler, date_de_deces_consore, na.rm = TRUE))
+# crée une nouvelle colonne dcd_profiler qui sera TRUE si date_de_deces_profiler n'est pas NA, crée une nouvelle colonne dcd_consore qui sera TRUE si date_de_deces_consore n'est pas NA, crée une nouvelle colonne date_de_deces en prenant le minimum entre les dates trouvées dans date_de_deces_profiler et date_de_deces_consore) et Si les deux dates sont NA, la valeur résultante sera également NA
+
+```
+
+## Données immunologiques
+
+```{r Préparation des données immunologiques}
+                              
+d_cyto <- readxl::read_excel("thibault/immu_data.xlsx") %>% 
+  rename("num_inclusion" = "N° INCLUSION",
+         "cat_cancer" = `CATEGORIES CANCERS`) %>% 
+  mutate("organ" = fct_recode(cat_cancer, 
+                                      NULL = "inconnu",
+                                      "Systeme_nerveux_central" = "Cerveau",
+                                      "Digestif" = "Estomac",
+                                      "Digestif" = "Digestif",
+                                      "Digestif" = "Œsophage",
+                                      "Digestif" = "intestin",
+                                      "Digestif" = "Intestin",
+                                      "Digestif" = "Carcinome colorectal",
+                                      "Voies urinaires" = "RCC",
+                                      "Sarcome" = "sarcome",
+                                      "Genital_homme" = "Prostate",
+                                      "Genital_homme" = "Testicules",
+                                      "Genital_femme" = "Utérus",
+                                      "Genital_femme" = "Ovaire Autres",
+                                      "Genital_femme" = "Ovaire Carcinome",
+                                      "Autres"  = "Melanome",
+                                      "Autres" = "Thyroide",
+                                      "Autres"  = "HCC",
+                                      "Autres"  = "Lymphome",
+                                      "Autres"  = "Neuroblastome",
+                                      "Autres"  = "autres tumeurs",
+                                      "Autres"  = "autres carcinomes",
+                                      "Autres" = "Autres"))
+
+dd <- left_join(d_cyto, d_clin, by = "num_inclusion")
+# On a là un dataframe avec les données issus de CONSORE et de Profiler avec les données de cytométrie
+
+# Il faudra après rajouter à ce dataframe les données des mutations SNV
+# SNV_data_base <- read.csv("donnees_biomol_extraction/SNV.csv")
+
+
+#with(dd, table(organ_profiler, `organ`))
+# Le with permet de ne pas écrire le dd$organ_profiler ou autres, ça evite de faire le dd$, ça spécifie le dataframe à utilisé pour séléctionner les colonnes
+
+```
+
+## Données génomiques
+
+```{r Préparation des données génomiques}
+
+d_genomique_mutation <- readr::read_delim(
+  file = "projet_ImmunoProfiler_genomique/projet_ImmunoProfiler_genomique/tableauMutation_ImmunoProfiler_avec_patients_complementaire.csv", 
+  na = "NA", 
+  delim = ",") %>% # On importe les données de mutations
+  # janitor::clean_names() %>% # On clean les noms %>%
+  data.table::transpose(keep.names = "num_inclusion", make.names = "Gene") %>% # On transpose les lignes en colonnes et inversement (comme pour les autres données)
+  # `colnames<-`(.[1, ]) %>% # On renomme les noms de colonnes par les valeurs de la 1ere ligne
+  # .[-1, ] %>% # On retire la 1ère ligne (plus utils car stocké dans les noms de colonne maintenant)
+  # rename("num_inclusion" = "gene") %>% # On renomme la colonne gene qui ne correspond pas aux genes mais aux num_inclusion
+  mutate(num_inclusion = substring(num_inclusion, first = 2)) # Je conserve les char après la position 2 (après le "p") 
+
+colnames(d_genomique_mutation)[-1] <- paste0("mut_", colnames(d_genomique_mutation)[-1]) # On ajoute à toutes les colonnes le préfixe "mut_" pour plus tard lors de la jointure éviter les conflits de nom et écraser des valeurs
+d_genomique_mutation <- d_genomique_mutation %>% mutate(across(starts_with("mut_"), as.numeric )) # Pour toutes les colonnes commançant par "mut_" on transforme les valeurs en classe numériques car elles sont pour l'instant de type caractère
+
+
+dd2 <- dd %>% left_join(d_genomique_mutation, by = "num_inclusion") # On fait la jointure gauche de dd sur d_genomique_mutation via num_inclusion. 
+# On a notre gros dataframe dd2 qui contient maintenant les données de muattion des gènes
+
+##################################################################
+
+d_genomique_cnv <- readr::read_delim(
+  file = "projet_ImmunoProfiler_genomique/projet_ImmunoProfiler_genomique/tableauCNV_panel_ImmunoProfiler_avec_patients_complementaire.csv", 
+  na = "NA", 
+  delim = ",") %>% # On importe les données de mutations
+  # janitor::clean_names() %>% # On clean les noms
+  data.table::transpose(keep.names = "num_inclusion", make.names = "Gene") %>%  
+  # `colnames<-`(.[1, ]) %>% # On renomme les noms de colonnes par les valeurs de la 1ere ligne
+  # .[-1, ] %>% # On retire la 1ère ligne (plus utils car stocké dans les noms de colonne maintenant)
+  # rename("num_inclusion" = "gene") %>% # On renomme la colonne gene qui ne correspond pas aux genes mais aux num_inclusion
+  mutate(num_inclusion = substring(num_inclusion, first = 2)) # Je conserve les char après la position 2 (après le "p") 
+
+colnames(d_genomique_cnv)[-1] <- paste0("cnv_", colnames(d_genomique_cnv)[-1]) # On ajoute à toutes les colonnes le préfixe "cnv_" pour plus tard lors de la jointure éviter les conflits de nom et écraser des valeurs
+d_genomique_cnv <- d_genomique_cnv %>% mutate(across(starts_with("cnv_"), as.numeric )) # Pour toutes les colonnes commançant par "cnv_" on transforme les valeurs en classe numériques car elles sont pour l'instant de type caractère
+
+
+dd3 <- dd2 %>% left_join(d_genomique_cnv, by = "num_inclusion") # On fait la jointure gauche de d_genomique_cnv sur dd2 via num_inclusion. 
+# On a notre gros dataframe dd3 qui contient maintenant les données snv et cnv des gènes
+
+##################################################################
+
+
+
+
+
+
+############################### A remodifier avec les infos des nouveau patients !!!!!!!!!!!!!!
+d_geno_info_patient <- read.delim(file = "projet_ImmunoProfiler_genomique/projet_ImmunoProfiler_genomique/info_patients_ok_ImmunoProfiler.txt") %>%
+  janitor::clean_names() %>% # On clean les noms
+  select("num_inclusion" = "id_patient",
+         "version_panel" = "panel") # On importe les métadonnées génomiques pour la détéction des cnv (panel utilisé et la méthode de détection des gènes)
+
+dd4 <- 
+  dd3 %>% 
+  left_join(d_geno_info_patient, by = "num_inclusion") %>% # On rajoute ces info à notre gros df
+  filter(!is.na(organ))
+
+
+
+
+d_info_mutation <- read.delim(file = "projet_ImmunoProfiler_genomique/projet_ImmunoProfiler_genomique/detailsMutations_ImmunoProfiler.txt") %>%
+  janitor::clean_names() %>% # On clean les noms
+  rename("num_inclusion" = "id_study") %>%
+  left_join(dd4 %>% select(num_inclusion, cat_cancer, organ), by = "num_inclusion")
+
+d_info_cnv <- read.delim(file = "projet_ImmunoProfiler_genomique/projet_ImmunoProfiler_genomique/détails_csv.txt") %>%
+  janitor::clean_names() %>% # On clean les noms
+  mutate(num_inclusion = substring(num_inclusion, first = 2)) %>% # Je conserve les char après la position 2 (après le "p") 
+  left_join(dd4 %>% select(num_inclusion, cat_cancer, organ), by = "num_inclusion")
+
+```
+
+```{r Comptage des patients avec, sans ou une partie des données génétiques}
+
+
+# Nombre de patient totale
+length(dd4$num_inclusion) # 483 patients au total OK (Les 492 patients initiaus auxquelles on a enlevé les 9 patients sans organ pour le cancer)
+length(d_genomique_mutation$num_inclusion) # 387 patients ayant des données de SNV
+length(d_genomique_cnv$num_inclusion) # 341 patients ayant des données de CNV
+
+# Le nombre de patients ayant des données de SNV ET CNV
+common_num_inclusion <- intersect(d_genomique_mutation$num_inclusion, d_genomique_cnv$num_inclusion) # Extraire les num_inclusion communs aux deux tables
+num_common_in_dd4 <- sum(dd4$num_inclusion %in% common_num_inclusion) # Compter combien de ces num_inclusion communs sont présents dans dd4
+num_common_in_dd4 # 318 patients qui ont toutes les données génomiques (SNV et CNV)
+
+# Le nombre de patients n'ayant aucune des données de SNV ET CNV
+all_genomic_num_inclusion <- union(d_genomique_mutation$num_inclusion, d_genomique_cnv$num_inclusion) # Identifier les num_inclusion présents dans d_genomique_mutation et d_genomique_cnv
+num_not_in_any_genomic <- sum(!(dd4$num_inclusion %in% all_genomic_num_inclusion)) # Compter le nombre de num_inclusion dans dd4 qui ne sont dans aucune des deux tables
+num_not_in_any_genomic # 88 patients qui n'ont aucunes données génomiques
+
+
+# Le nombre de patients ayant des données de SNV UNIQUEMENT
+num_SNV <- sum(dd4$num_inclusion %in% d_genomique_mutation$num_inclusion) - num_common_in_dd4 
+num_SNV # 60 patient avec des données uniquement SNV
+
+# Le nombre de patients ayant des données de CNV UNIQUEMENT
+num_CNV <- sum(dd4$num_inclusion %in% d_genomique_cnv$num_inclusion) - num_common_in_dd4 
+num_CNV # 17 patient avec des données uniquement CNV
+
+# Vérifions si les comptes sont bons :
+num_CNV + num_SNV + num_not_in_any_genomic + num_common_in_dd4 == 483 # OK parfait 
+
+
+
+
+
+
+# Filtrer dd4 pour ne conserver que les patients avec organ égal à "Digestif"
+dd4_digestif <- dd4 %>%
+  filter(organ == "Digestif")
+
+# Nombre de patients après filtrage
+length(dd4_digestif$num_inclusion) # nombre total de patients "Digestif"
+
+# Identifier les num_inclusion présents dans d_genomique_mutation et d_genomique_cnv
+all_genomic_num_inclusion <- union(d_genomique_mutation$num_inclusion, d_genomique_cnv$num_inclusion)
+# Compter le nombre de num_inclusion dans dd4_digestif qui ne sont dans aucune des deux tables
+num_not_in_any_genomic_digestif <- sum(!(dd4_digestif$num_inclusion %in% all_genomic_num_inclusion))
+# Afficher le résultat
+num_not_in_any_genomic_digestif
+
+# Le nombre de patients ayant des données de SNV ET CNV
+common_num_inclusion <- intersect(d_genomique_mutation$num_inclusion, d_genomique_cnv$num_inclusion)
+num_common_in_dd4_digestif <- sum(dd4_digestif$num_inclusion %in% common_num_inclusion)
+num_common_in_dd4_digestif
+
+# Le nombre de patients ayant des données de SNV UNIQUEMENT
+num_SNV_digestif <- sum(dd4_digestif$num_inclusion %in% d_genomique_mutation$num_inclusion) - num_common_in_dd4_digestif
+num_SNV_digestif
+
+# Le nombre de patients ayant des données de CNV UNIQUEMENT
+num_CNV_digestif <- sum(dd4_digestif$num_inclusion %in% d_genomique_cnv$num_inclusion) - num_common_in_dd4_digestif
+num_CNV_digestif
+
+# Vérifions si les comptes sont bons :
+num_CNV_digestif + num_SNV_digestif + num_not_in_any_genomic_digestif + num_common_in_dd4_digestif == length(dd4_digestif$num_inclusion)
+
+
+
+
+
+
+
+# Filtrer dd4 pour ne conserver que les patients avec organ égal à "ORL"
+dd4_orl <- dd4[dd4$organ == "ORL", ]
+
+# Nombre de patients après filtrage
+num_total_orl <- length(dd4_orl$num_inclusion) # nombre total de patients "ORL"
+num_total_orl
+
+# Identifier les num_inclusion présents dans d_genomique_mutation et d_genomique_cnv
+all_genomic_num_inclusion <- union(d_genomique_mutation$num_inclusion, d_genomique_cnv$num_inclusion)
+# Compter le nombre de num_inclusion dans dd4_orl qui ne sont dans aucune des deux tables
+num_not_in_any_genomic_orl <- sum(!(dd4_orl$num_inclusion %in% all_genomic_num_inclusion))
+num_not_in_any_genomic_orl
+
+# Le nombre de patients ayant des données de SNV ET CNV
+common_num_inclusion <- intersect(d_genomique_mutation$num_inclusion, d_genomique_cnv$num_inclusion)
+num_common_in_dd4_orl <- sum(dd4_orl$num_inclusion %in% common_num_inclusion)
+num_common_in_dd4_orl
+
+# Le nombre de patients ayant des données de SNV UNIQUEMENT
+num_SNV_orl <- sum(dd4_orl$num_inclusion %in% d_genomique_mutation$num_inclusion) - num_common_in_dd4_orl
+num_SNV_orl
+
+# Le nombre de patients ayant des données de CNV UNIQUEMENT
+num_CNV_orl <- sum(dd4_orl$num_inclusion %in% d_genomique_cnv$num_inclusion) - num_common_in_dd4_orl
+num_CNV_orl
+
+# Vérifions si les comptes sont bons :
+verification <- num_CNV_orl + num_SNV_orl + num_not_in_any_genomic_orl + num_common_in_dd4_orl == num_total_orl
+verification
+
+
+
+
+
+# Filtrer dd4 pour ne conserver que les patients avec organ ni égal à "Digestif" ni à "ORL"
+dd4_other <- dd4[!(dd4$organ %in% c("Digestif", "ORL")), ]
+
+# Nombre de patients après filtrage
+num_total_other <- length(dd4_other$num_inclusion) # nombre total de patients autres
+num_total_other
+
+# Identifier les num_inclusion présents dans d_genomique_mutation et d_genomique_cnv
+all_genomic_num_inclusion <- union(d_genomique_mutation$num_inclusion, d_genomique_cnv$num_inclusion)
+
+# Compter le nombre de num_inclusion dans dd4_other qui ne sont dans aucune des deux tables
+num_not_in_any_genomic_other <- sum(!(dd4_other$num_inclusion %in% all_genomic_num_inclusion))
+num_not_in_any_genomic_other
+
+# Le nombre de patients ayant des données de SNV ET CNV
+common_num_inclusion <- intersect(d_genomique_mutation$num_inclusion, d_genomique_cnv$num_inclusion)
+num_common_in_dd4_other <- sum(dd4_other$num_inclusion %in% common_num_inclusion)
+num_common_in_dd4_other
+
+# Le nombre de patients ayant des données de SNV UNIQUEMENT
+num_SNV_other <- sum(dd4_other$num_inclusion %in% d_genomique_mutation$num_inclusion) - num_common_in_dd4_other
+num_SNV_other
+
+# Le nombre de patients ayant des données de CNV UNIQUEMENT
+num_CNV_other <- sum(dd4_other$num_inclusion %in% d_genomique_cnv$num_inclusion) - num_common_in_dd4_other
+num_CNV_other
+
+# Vérifions si les comptes sont bons :
+verification <- num_CNV_other + num_SNV_other + num_not_in_any_genomic_other + num_common_in_dd4_other == num_total_other
+verification
+
+
+
+
+
+
+
+```
+
+# Analyses Watterfall Plot
+
+## SNV
+
+### Gestion des données manquantes
+
+```{r Gestion des données manquantes genomiques mutations}
+
+data_mut <- merge(d_genomique_mutation, dd4[c("num_inclusion", "cat_cancer")], by = "num_inclusion")
+
+
+nbNA_gene <- colSums(is.na(data_mut)) # On compte le nombre de valeur manquante NA (on regarde la somme) pour chaque colonne (genes) et on stocke ça dans un vecteur
+table(nbNA_gene) # On regarde ce vecteur (Il y a 23 genes avec au moins 319 NA)
+data_mut_narm <- data_mut[ , nbNA_gene < 319] # On sélectionne que les colonnes (les genes) qui ont une somme de NA inférieur à 319
+# data_mut_narm <- data_mut[ , nbNA_gene == 0] # On sélectionne que les colonnes (les genes) qui ont une somme de NA inférieur à 319
+
+
+nbNA_ind <- apply(data_mut_narm, 1, FUN = function(x) sum(is.na(x))) # On compte le nombre de valeur manquante NA (on regarde la somme) pour chaque ligne (patients) et on stocke ça dans un vecteur
+table(nbNA_ind) # On regarde ce vecteur (Il y a 106 patients avec des lignes contenant des NA)
+data_mut_narm <- data_mut_narm[nbNA_ind == 0,] # On sélectionne que les lignes du vecteur (les patients) qui ont une somme de NA valant 0 (patient pour lesquels on a toutes les données)
+
+```
+
+### Pourcentages de mutations
+
+```{r Pourcentages de mutations}
+
+mutation_matrix <- as.matrix(data_mut[,2:94])
+mutation_pourcentage <- as.data.frame((colSums(mutation_matrix == 1, na.rm = TRUE) / nrow(mutation_matrix) ) * 100)
+mutation_pourcentage
+
+```
+
+### Statistiques basiques
+
+```{r statistiques basiques, results="asis"}
+
+summarytools::st_options(lang = 'fr')
+summarytools::dfSummary(data_mut_narm,
+                        plain.ascii  = FALSE,
+                        style        = 'grid',
+                        graph.magnif = 0.85,
+                        varnumbers = FALSE,
+                        valid.col    = FALSE,
+                        tmp.img.dir  = "/tmp")
+
+```
+
+### Statistiques de mutation par cancer
+
+```{r statistiques de mutation par cancer, results="asis"}
+
+data_subset <- subset(data_mut_narm, select = -num_inclusion) # Exclure la colonne "num_inclusion" du dataframe sinon c'est prend trop de place
+
+tab <- tableby(
+  data_subset$cat_cancer ~ ., # On regarde les stats que pour les colonnes gènes
+  data=data_subset)
+
+summary(tab, pfootnote = TRUE)
+
+```
+
+### Watterfall Plot pour tous les cancers
+
+```{r WatterfallPlot pancancer}
+
+################################################################################
+# https://www.cbioportal.org/oncoprinter                                       #
+# https://currentprotocols.onlinelibrary.wiley.com/doi/full/10.1002/cpz1.252   #
+################################################################################
+
+myVars <- 
+  d_info_mutation %>% 
+  mutate(trv_type = "missense") %>% 
+  select(c("num_inclusion", "gene_symbol", "trv_type", "amino_acid_change")) %>% 
+  setnames(c("sample", "gene", "mutation", "amino_acid_change"))
+
+myHierarchy <- 
+  data.table("mutation"=c("missense"), color=c("#046C9A")) # Permet de représenter en priorité des types de mutation, ici on a que des mutations Missense donc pas très utile
+
+mutationBurden <- d_info_mutation[c("num_inclusion", "coverage")] %>% setnames(c("sample", "coverage"))
+myMutBurden <- as.numeric(mutationBurden$coverage)
+names(myMutBurden) <- mutationBurden$sample
+
+d_cyto_narm <- read.table("cluster_immuno", h = T)
+
+
+
+clinicalData <- Clinical(inputData = 
+                           d_info_mutation %>%
+                           select(c("num_inclusion", "cat_cancer")) %>% 
+                           setnames(c("sample", "Categorie_cancer")) %>% 
+                           mutate(cancer_group = case_when(Categorie_cancer %in% c("Carcinome colorectal", "Digestif", "Estomac", "intestin", "Intestin", "Œsophage", "Pancréas") ~ "Digestifs",
+                                                           Categorie_cancer %in% c("Ovaire Autres", "Ovaire Carcinome", "Prostate", "Testicules", "Thyroide", "Utérus", "Voies urinaires") ~ "Gynéco/Uro",
+                                                           Categorie_cancer %in% c("HCC", "RCC") ~ "Hépatiques/Rénaux",
+                                                           Categorie_cancer %in% c("Melanome", "sarcome", "Sarcome") ~ "Peau/Tissus mous",
+                                                           Categorie_cancer %in% c("Poumon", "ORL") ~ "Thoraciques",
+                                                           Categorie_cancer %in% c("Cerveau", "Neuroblastome") ~ "Neurologiques",
+                                                           TRUE ~ "Autres")) %>%
+                           select(c("sample", "cancer_group")) %>%
+                           left_join(d_cyto_narm[c("num_inclusion", "typo")] %>% setnames(c("sample", "cluster")),
+                                     d_typo, 
+                                     by = "sample"), 
+                         
+                         palette = c("Digestifs" = "#85D4E3",  # Couleur représentative pour les cancers digestifs
+                                     "Gynéco/Uro" = "#CC6688",  # Couleur rose pour représenter les cancers gynéco-urologiques
+                                     "Hépatiques/Rénaux" = "#BBBB22",  # Couleur jaune pour les cancers du foie et des reins
+                                     "Peau/Tissus mous" = "#FF9900",  # Couleur orange pour la peau et sarcomes
+                                     "Thoraciques" = "#3366CC",  # Bleu pour les cancers thoraciques
+                                     "Neurologiques" = "#000000",  # Noir pour les cancers neurologiques
+                                     "Autres" = "#798E87",  # Gris pour les autres types de cancers moins communs
+                                     "1" = "red",
+                                     "2" = "blue",
+                                     "3" = "green",
+                                     "4" = "purple",
+                                     "5" = "yellow"),
+                         
+                         clinicalLayers = list(theme(axis.text.x = element_text(angle=90, color="black", size=3))),
+                         
+                         legendColumns = 2)
+
+
+
+plotData <- Waterfall(input = myVars,
+                      coverage = myMutBurden, 
+                      mutationHierarchy = myHierarchy,
+                      clinical = clinicalData, 
+                      geneMax = 10, 
+                      plotA = "burden", 
+                      plotATally = "complex",
+                      plotBTally = "complex", 
+                      sampleNames = TRUE, 
+                      sectionHeights = c(0.2, 0.6, 0.2), 
+                      sectionWidths = c(0.2, 0.8),
+                      plotALayers = list(theme(axis.text.x=element_text(angle=90, color="black", size=2))),
+                      plotBLayers = list(theme(axis.text.x=element_text(angle=0, color="black", size=10))), 
+                      plotCLayers = list(theme(axis.text.x=element_text(angle=90, color="black", size=2))))
+
+
+drawPlot(plotData)
+
+# plotData <- Waterfall(myVars, mutationHierarchy = myHierarchy)
+# plotData <- Waterfall(myVars, mutationHierarchy = myHierarchy, clinical = clinicalData)
+# plotData <- Waterfall(myVars, mutationHierarchy = myHierarchy, coverage=myMutBurden, plotA = "burden")
+# plotData <- Waterfall(myVars, labelColumn="amino acid change", mutationHierarchy = myHierarchy, plotATally = "complex", plotBTally = "complex", geneMax=10)
+
+# pdf(file="Figure_1.pdf", height=8, width=12)
+# dev.off()
+
+# table(myClinical$Categorie_cancer)
+# 
+# myClinicalColors <- c(
+#   "Autres" = "#798E87",
+#   "autres carcinomes" = "#C27D38",
+#   "autres tumeurs" = "#CCC591",
+#   "Carcinome colorectal" = "#29211F",
+#   "Cerveau" = "#9C964A",
+#   "Digestif" = "#85D4E3",
+#   "Estomac" = "#A8B6BF",
+#   "HCC" = "#FF0000",
+#   "inconnu" = "#00A08A",
+#   "intestin" = "#F2AD00",
+#   "Intestin" = "#5BBCD6",
+#   "Lymphome" = "#046C9A",
+#   "Melanome" = "#D69C4E",
+#   "Neuroblastome" = "#000000",
+#   "Œsophage" = "#446455",
+#   "ORL" = "#76AB7F",
+#   "Ovaire Autres" = "#674172",
+#   "Ovaire Carcinome" = "#CC6688",
+#   "Pancréas" = "#BA7FAD",
+#   "Poumon" = "#3366CC",
+#   "Prostate" = "#88AA77",
+#   "RCC" = "#BBBB22",
+#   "sarcome" = "#FF9900",
+#   "Sarcome" = "#DD4477",
+#   "Sein" = "#994499",
+#   "Testicules" = "#22AA99",
+#   "Thyroide" = "#AAAA11",
+#   "Utérus" = "#6633CC",
+#   "Voies urinaires" = "#E67300"
+# )
+
+```
+
+D'un point de vue pancancer, le gène TP53 est celui retrouvé muté dans la majorité des cancers
+
+### Watterfall Plot pour Cancer colorectal
+
+```{r WatterfallPlot cancer colorectal}
+
+myVars2 <- 
+  d_info_mutation %>% 
+  filter(cat_cancer == "Carcinome colorectal") %>%
+  mutate(trv_type = "missense") %>% 
+  select(c("num_inclusion", "gene_symbol", "trv_type", "amino_acid_change")) %>% 
+  setnames(c("sample", "gene", "mutation", "amino_acid_change"))
+
+clinicalData <- Clinical(inputData = 
+                           d_info_mutation %>%
+                           filter(cat_cancer == "Carcinome colorectal") %>%
+                           select(c("num_inclusion", "cat_cancer")) %>% 
+                           setnames(c("sample", "Categorie_cancer")) %>% 
+                           left_join(d_cyto_narm[c("num_inclusion", "typo")] %>% setnames(c("sample", "cluster")),
+                                     d_typo, 
+                                     by = "sample"), 
+
+                         palette = c("Carcinome colorectal" = "grey",
+                                     "1" = "red",
+                                     "2" = "blue",
+                                     "3" = "green",
+                                     "4" = "purple",
+                                     "5" = "yellow"),
+                                         
+                         clinicalLayers = list(theme(axis.text.x = element_text(angle=90, color="black", size=3))),
+                         
+                         legendColumns = 2)
+
+
+plotData <- Waterfall(input = myVars2,
+                      coverage = myMutBurden, 
+                      mutationHierarchy = myHierarchy,
+                      clinical = clinicalData, 
+                      geneMax = 10, 
+                      plotA = "burden", 
+                      plotATally = "complex",
+                      plotBTally = "complex", 
+                      sampleNames = TRUE, 
+                      sectionHeights = c(0.2, 0.6, 0.2), 
+                      sectionWidths = c(0.2, 0.8),
+                      plotALayers = list(theme(axis.text.x=element_text(angle=90, color="black", size=2))),
+                      plotBLayers = list(theme(axis.text.x=element_text(angle=0, color="black", size=10))), 
+                      plotCLayers = list(theme(axis.text.x=element_text(angle=90, color="black", size=2))),
+                      labelColumn="amino_acid_change", 
+                      labelSize = 1.7, 
+                      labelAngle = 90)
+
+drawPlot(plotData)
+
+```
+
+D'un point de vue cancer colorectal, les gènes KRAS et APC sont mutés dans la majorité des cancers colorectaux (50% des patients pour KRAS et 35% pour APC) En prenant en compte le gène TP53 muté avec sa dimension pancancer : Dans cette cohorte, le profil mutationnel d'un patient atteint de cancer colorectal est : TP53 muté / KRAS muté / APC muté
+
+### Watterfall Plot pour Cancer ORL
+
+```{r WatterfallPlot cancer ORL}
+
+myVars3 <- d_info_mutation %>% filter(d_info_mutation$cat_cancer == "ORL")
+myVars3$trv_type <- "missense"
+
+myVars3 <- myVars3[c("num_inclusion", "gene_symbol", "trv_type", "amino_acid_change")]
+setnames(myVars3, c("sample", "gene", "mutation", "amino_acid_change"))
+
+myHierarchy3 <- data.table("mutation"=c("missense"), color=c("#046C9A")) # Permet de représenter en priorité des types de mutation, ici on a que des mutations Missense donc pas très utile
+
+myClinical <- d_info_mutation %>% filter(d_info_mutation$cat_cancer == "ORL")
+myClinical <- myClinical[c("num_inclusion", "cat_cancer")]
+setnames(myClinical, c("sample", "Categorie_cancer"))
+
+d_typo <- d_cyto_narm[c("num_inclusion", "typo")] %>% setnames(c("sample", "cluster"))
+myClinical <- left_join(myClinical, d_typo, by = "sample")
+
+myClinicalColors <- c(
+  "ORL" = "grey",
+  "1" = "red",
+  "2" = "blue",
+  "3" = "green",
+  "4" = "purple",
+  "5" = "yellow"
+)
+
+myHierarchy2 <- data.table("mutation"=c("missense"), color=c("#046C9A")) # Permet de représenter en priorité des types de mutation, ici on a que des mutations Missense donc pas très utile
+
+LayerClinic <- list(theme(axis.text.x=element_text(angle=90, color="black", size= 6)))
+
+clinicalData <- Clinical(inputData = myClinical, palette = myClinicalColors, legendColumns = 1, clinicalLayers = LayerClinic)
+
+mutationBurden3 <- d_info_mutation[c("num_inclusion", "coverage")]
+setnames(mutationBurden3, c("sample", "coverage"))
+myMutBurden3 <- as.numeric(mutationBurden3$coverage)
+names(myMutBurden3) <- mutationBurden3$sample
+
+newLayerA <- list(theme(axis.text.x=element_text(angle=90, color="black", size=7)))
+newLayerB <- list(theme(axis.text.x=element_text(angle=0, color="black", size=10)))
+newLayerC <- list(theme(axis.text.x=element_text(angle=90, color="black", size=7)))
+
+plotData3 <- Waterfall(myVars3, coverage = myMutBurden3, clinical = clinicalData, mutationHierarchy = myHierarchy3, geneMax=10, plotA = "burden", plotATally = "complex",plotALayers = newLayerA, plotBTally = "complex", plotBLayers = newLayerB, sampleNames = TRUE, sectionHeights = c(0.2, 0.6, 0.2), sectionWidths = c(0.2, 0.8), plotCLayers = newLayerC, gridOverlay = TRUE, labelColumn="amino_acid_change", labelSize = 2.25, labelAngle = 90)
+
+drawPlot(plotData3)
+
+```
+
+D'un point de vue cancer ORL, il est dificile de trouver des gènes mutés spécifiques à ce type de cancer. On observe le gène TP53 muté avec sa dimension pancancer. Il est difficile d'établir un profil muationnel pour ce type de cancer
+
+### Watterfall Plot pour Cancer Cerveau
+
+```{r WatterfallPlot cancer Cerveau}
+
+myVars4 <- d_info_mutation %>% filter(d_info_mutation$cat_cancer == "Cerveau")
+myVars4$trv_type <- "missense"
+
+myVars4 <- myVars4[c("num_inclusion", "gene_symbol", "trv_type", "amino_acid_change")]
+setnames(myVars4, c("sample", "gene", "mutation", "amino_acid_change"))
+
+myHierarchy4 <- data.table("mutation"=c("missense"), color=c("#046C9A")) # Permet de représenter en priorité des types de mutation, ici on a que des mutations Missense donc pas très utile
+
+
+
+myClinical <- d_info_mutation %>% filter(d_info_mutation$cat_cancer == "Cerveau")
+myClinical <- myClinical[c("num_inclusion", "cat_cancer")]
+setnames(myClinical, c("sample", "Categorie_cancer"))
+
+d_typo <- d_cyto_narm[c("num_inclusion", "typo")] %>% setnames(c("sample", "cluster"))
+myClinical <- left_join(myClinical, d_typo, by = "sample")
+
+
+
+myClinicalColors <- c(
+  "ORL" = "grey",
+  "1" = "red",
+  "2" = "blue",
+  "3" = "green",
+  "4" = "purple",
+  "5" = "yellow"
+)
+
+myHierarchy2 <- data.table("mutation"=c("missense"), color=c("#046C9A")) # Permet de représenter en priorité des types de mutation, ici on a que des mutations Missense donc pas très utile
+
+
+LayerClinic <- list(theme(axis.text.x=element_text(angle=90, color="black", size= 6)))
+
+clinicalData <- Clinical(inputData = myClinical, palette = myClinicalColors, legendColumns = 1, clinicalLayers = LayerClinic)
+
+
+mutationBurden4 <- d_info_mutation[c("num_inclusion", "coverage")]
+setnames(mutationBurden4, c("sample", "coverage"))
+myMutBurden4 <- as.numeric(mutationBurden4$coverage)
+names(myMutBurden4) <- mutationBurden4$sample
+
+newLayerA <- list(theme(axis.text.x=element_text(angle=90, color="black", size=7)))
+newLayerB <- list(theme(axis.text.x=element_text(angle=0, color="black", size=10)))
+newLayerC <- list(theme(axis.text.x=element_text(angle=90, color="black", size=7)))
+
+plotData4 <- Waterfall(myVars4, coverage = myMutBurden4, clinical = clinicalData, mutationHierarchy = myHierarchy4, geneMax=10, plotA = "burden", plotATally = "complex",plotALayers = newLayerA, plotBTally = "complex", plotBLayers = newLayerB, sampleNames = TRUE, sectionHeights = c(0.2, 0.6, 0.2), sectionWidths = c(0.2, 0.8), plotCLayers = newLayerC, gridOverlay = TRUE, labelColumn="amino_acid_change", labelSize = 2.5)
+
+drawPlot(plotData4)
+
+```
+
+D'un point de vue cancer du cerveau, il est là aussi dificile de trouver des gènes mutés spécifiques à ce type de cancer. On observe le gène TP53 muté avec sa dimension pancancer. Il est difficile d'établir un profil muationnel pour ce type de cancer
+
+## CNV
+
+```{r WaterfallPlot CNV des gènes (all cancers)}
+
+### Waterfall Plot que CSV (all cancers)
+
+myVars5 <- d_info_cnv
+
+setnames(myVars5, c("sample", "gene", "mutation", "Categorie_cancer", "Organ"))
+
+myHierarchy5 <- data.table("mutation"=c("délétion", "gain"), color=c("#046C9A", "#CC6688")) 
+
+myClinical <- d_info_cnv
+myClinical <- myClinical[c("sample", "Categorie_cancer")]
+setnames(myClinical, c("sample", "Categorie_cancer"))
+
+myClinical <- myClinical %>%
+  mutate(
+    cancer_group = case_when(
+      Categorie_cancer %in% c("Carcinome colorectal", "Digestif", "Estomac", "intestin", "Intestin", "Œsophage", "Pancréas") ~ "Digestifs",
+      Categorie_cancer %in% c("Ovaire Autres", "Ovaire Carcinome", "Prostate", "Testicules", "Thyroide", "Utérus", "Voies urinaires") ~ "Gynécologiques/Urologiques",
+      Categorie_cancer %in% c("HCC", "RCC") ~ "Hépatiques/Rénaux",
+      Categorie_cancer %in% c("Melanome", "sarcome", "Sarcome") ~ "Peau/Tissus mous",
+      Categorie_cancer %in% c("Poumon", "ORL") ~ "Thoraciques",
+      Categorie_cancer %in% c("Cerveau", "Neuroblastome") ~ "Neurologiques",
+      TRUE ~ "Autres"
+    )
+  )
+
+myClinical <- myClinical[,c("sample", "cancer_group")]
+
+d_typo <- d_cyto_narm[c("num_inclusion", "typo")] %>% setnames(c("sample", "cluster"))
+myClinical <- left_join(myClinical, d_typo, by = "sample")
+
+
+
+myClinicalColors <- c(
+  "Digestifs" = "#85D4E3",  # Couleur représentative pour les cancers digestifs
+  "Gynécologiques/Urologiques" = "#CC6688",  # Couleur rose pour représenter les cancers gynéco-urologiques
+  "Hépatiques/Rénaux" = "#BBBB22",  # Couleur jaune pour les cancers du foie et des reins
+  "Peau/Tissus mous" = "#FF9900",  # Couleur orange pour la peau et sarcomes
+  "Thoraciques" = "#3366CC",  # Bleu pour les cancers thoraciques
+  "Neurologiques" = "#000000",  # Noir pour les cancers neurologiques
+  "Autres" = "#798E87",  # Gris pour les autres types de cancers moins communs
+  "1" = "red",
+  "2" = "blue",
+  "3" = "green",
+  "4" = "purple",
+  "5" = "yellow"
+)
+
+LayerClinic <- list(theme(axis.text.x=element_text(angle=90, color="black", size=3)))
+
+clinicalData <- Clinical(inputData = myClinical, palette = myClinicalColors, legendColumns = 2, clinicalLayers = LayerClinic)
+
+newLayerA <- list(theme(axis.text.x=element_text(angle=90, color="black", size=1)))
+newLayerB <- list(theme(axis.text.x=element_text(angle=0, color="black", size=10)))
+newLayerC <- list(theme(axis.text.x=element_text(angle=90, color="black", size=1)))
+
+plotData5 <- Waterfall(myVars5, mutationHierarchy = myHierarchy5, clinical = clinicalData, geneMax=10, plotATally = "complex", plotALayers = newLayerA, plotBTally = "complex", plotBLayers = newLayerB, sampleNames = TRUE, sectionHeights = c(0.2, 0.6, 0.2), sectionWidths = c(0.2, 0.8), plotCLayers = newLayerC)
+
+drawPlot(plotData5)
+
+
+```
+
+### Waterfall Plot que CNV pour colorectal cancer
+
+```{r WaterfallPlot CNV des gènes (colorectal cancers)}
+
+myVars6 <- d_info_cnv %>% filter(Categorie_cancer == "Carcinome colorectal")
+myVars6 <- myVars6[,1:3]
+setnames(myVars6, c("sample", "gene", "mutation"))
+
+myHierarchy6 <- data.table("mutation"=c("délétion", "gain"), color=c("#046C9A", "#CC6688")) 
+
+
+myClinical <- d_info_cnv %>% filter(Categorie_cancer == "Carcinome colorectal")
+myClinical <- myClinical[c("sample", "Categorie_cancer")]
+
+d_typo <- d_cyto_narm[c("num_inclusion", "typo")] %>% setnames(c("sample", "cluster"))
+myClinical <- left_join(myClinical, d_typo, by = "sample")
+
+
+
+myClinicalColors <- c(
+  "Carcinome colorectal" = "grey",
+  "1" = "red",
+  "2" = "blue",
+  "3" = "green",
+  "4" = "purple",
+  "5" = "yellow"
+)
+
+
+LayerClinic <- list(theme(axis.text.x=element_text(angle=90, color="black", size=3)))
+
+clinicalData <- Clinical(inputData = myClinical, palette = myClinicalColors, legendColumns = 1, clinicalLayers = LayerClinic)
+
+
+newLayerA <- list(theme(axis.text.x=element_text(angle=90, color="black", size=1)))
+newLayerB <- list(theme(axis.text.x=element_text(angle=0, color="black", size=10)))
+newLayerC <- list(theme(axis.text.x=element_text(angle=90, color="black", size=1)))
+
+plotData6 <- Waterfall(myVars6, mutationHierarchy = myHierarchy6, clinical = clinicalData, geneMax=40, plotATally = "complex", plotALayers = newLayerA, plotBTally = "complex", plotBLayers = newLayerB, sampleNames = TRUE, sectionHeights = c(0.2, 0.6, 0.2), sectionWidths = c(0.2, 0.8), plotCLayers = newLayerC)
+
+drawPlot(plotData6)
+
+
+```
+
+### Waterfall Plot que CNV pour cancer ORL
+
+```{r WaterfallPlot CNV des gènes (ORL cancers)}
+
+myVars7 <- d_info_cnv %>% filter(Categorie_cancer == "ORL")
+myVars7 <- myVars7[,1:3]
+setnames(myVars7, c("sample", "gene", "mutation"))
+
+myHierarchy7 <- data.table("mutation"=c("délétion", "gain"), color=c("#046C9A", "#CC6688")) 
+
+myClinical <- d_info_cnv %>% filter(Categorie_cancer == "ORL")
+myClinical <- myClinical[c("sample", "Categorie_cancer")]
+
+d_typo <- d_cyto_narm[c("num_inclusion", "typo")] %>% setnames(c("sample", "cluster"))
+myClinical <- left_join(myClinical, d_typo, by = "sample")
+
+
+
+myClinicalColors <- c(
+  "ORL" = "grey",
+  "1" = "red",
+  "2" = "blue",
+  "3" = "green",
+  "4" = "purple",
+  "5" = "yellow"
+)
+
+
+LayerClinic <- list(theme(axis.text.x=element_text(angle=90, color="black", size=3)))
+
+clinicalData <- Clinical(inputData = myClinical, palette = myClinicalColors, legendColumns = 1, clinicalLayers = LayerClinic)
+
+
+newLayerA <- list(theme(axis.text.x=element_text(angle=90, color="black", size=1)))
+newLayerB <- list(theme(axis.text.x=element_text(angle=0, color="black", size=10)))
+newLayerC <- list(theme(axis.text.x=element_text(angle=90, color="black", size=1)))
+
+plotData7 <- Waterfall(myVars7, mutationHierarchy = myHierarchy7, clinical = clinicalData, geneMax=40, plotATally = "complex", plotALayers = newLayerA, plotBTally = "complex", plotBLayers = newLayerB, sampleNames = TRUE, sectionHeights = c(0.2, 0.6, 0.2), sectionWidths = c(0.2, 0.8), plotCLayers = newLayerC)
+
+drawPlot(plotData7)
+
+```
+
+## Waterfall Plot CNV + SNV
+
+### Waterfall Plot CNV + SNV (all cancers)
+
+```{r WaterfallPlot CNV + mutations des gènes (all cancers)}
+
+myVars_bis <- myVars[,1:3]
+myVars5 <- myVars5[,1:3]
+myVars8 <- rbind(myVars_bis, myVars5)
+
+myHierarchy8 <- data.table("mutation"=c("missense", "délétion", "gain"), color=c("#FF9900", "#046C9A", "#CC6688")) # Permet de représenter en priorité des types de mutation, ici on a que des mutations Missense donc pas très utile
+
+
+newLayerA <- list(theme(axis.text.x=element_text(angle=90, color="black", size=1)))
+newLayerB <- list(theme(axis.text.x=element_text(angle=0, color="black", size=10)))
+newLayerC <- list(theme(axis.text.x=element_text(angle=90, color="black", size=1)))
+
+plotData8 <- Waterfall(myVars8, mutationHierarchy = myHierarchy8, geneMax=60, plotATally = "complex",plotALayers = newLayerA, plotBTally = "complex", plotBLayers = newLayerB, sampleNames = TRUE, sectionHeights = c(0.2, 0.6, 0.2), sectionWidths = c(0.2, 0.8), plotCLayers = newLayerC)
+
+drawPlot(plotData8)
+
+```
+
+```{r WaterfallPlot CNV + mutations des gènes (all cancers) v2}
+
+myVars_SNV_allcancer <- 
+  d_info_mutation %>% 
+  mutate(trv_type = "SNV") %>% 
+  select(c("num_inclusion", "gene_symbol", "trv_type")) %>% 
+  setnames(c("sample", "gene", "mutation"))
+myVars_CNV_allcancer <- 
+  d_info_cnv[,1:3] %>%
+  setnames(c("sample", "gene", "mutation"))
+
+myVars_SNV_CNV_allcancer <- rbind(myVars_SNV_allcancer, myVars_CNV_allcancer)
+
+myHierarchy8 <- data.table("mutation"=c("SNV", "délétion", "gain"), color=c("#FF9900", "#046C9A", "#CC6688"))
+
+
+newLayerA <- list(theme(axis.text.x=element_text(angle=90, color="black", size=1)))
+newLayerB <- list(theme(axis.text.x=element_text(angle=0, color="black", size=10)))
+newLayerC <- list(theme(axis.text.x=element_text(angle=90, color="black", size=1)))
+
+plotData8 <- Waterfall(myVars_SNV_CNV_allcancer, mutationHierarchy = myHierarchy8, geneMax=60, plotATally = "complex",plotALayers = newLayerA, plotBTally = "complex", plotBLayers = newLayerB, sampleNames = TRUE, sectionHeights = c(0.2, 0.6, 0.2), sectionWidths = c(0.2, 0.8), plotCLayers = newLayerC)
+
+drawPlot(plotData8)
+
+```
+
+```{r WaterfallPlot CNV + mutations des gènes (all cancers) v3 toutes les mutations en meme temps}
+
+dd4_organ <- dd4 %>% select(num_inclusion, organ)
+
+CNV_all_patients <- 
+  read.delim(file = "projet_ImmunoProfiler_genomique/projet_ImmunoProfiler_genomique/resultats_CNV_all_patients.txt") %>%
+  mutate(num_inclusion = substring(num_inclusion, first = 2)) %>% # Je conserve les char après la position 2 (après le "p")
+  left_join(dd4_organ, by = "num_inclusion") %>%
+  filter(!is.na(organ))
+
+length(unique(CNV_all_patients$num_inclusion))
+
+SNV_all_patients <- 
+  read.delim(file = "projet_ImmunoProfiler_genomique/projet_ImmunoProfiler_genomique/resultats_SNV_all_patients.txt") %>%
+  mutate(num_inclusion = substring(num_inclusion, first = 2)) %>% # Je conserve les char après la position 2 (après le "p")
+  left_join(dd4_organ, by = "num_inclusion") %>%
+  filter(!is.na(organ))
+
+length(unique(SNV_all_patients$num_inclusion))
+
+# Je crois que les nombres de patient ne sont pas cherent avec le flowchart car mon script ne note pas les patients qui n'ont aucune muattion ! A améliorer !
+
+CNV_SNV_all_patients <- 
+  rbind(CNV_all_patients, SNV_all_patients) %>% 
+  mutate(type_mutation = ifelse(is.na(type_mutation), "NA", type_mutation)) %>%
+  select(num_inclusion, gene, type_mutation) %>%
+  setnames(c("sample", "gene", "mutation")) %>%
+  filter(mutation != "Pas de mutation")
+
+myHierarchy8 <- data.table("mutation"=c("SNV", "Délétion", "Gain", "NA"), color=c("#FF9900", "#046C9A", "#CC6688", "grey")) # Permet de représenter en priorité des types de mutation, ici on a que des mutations Missense donc pas très utile
+
+
+newLayerA <- list(theme(axis.text.x=element_text(angle=90, color="black", size=1)))
+newLayerB <- list(theme(axis.text.x=element_text(angle=0, color="black", size=7),
+                        axis.text.y=element_text(angle=0, color="black", size=5)))
+newLayerC <- list(theme(axis.text.x=element_text(angle=90, color="black", size=1)))
+
+plotData8 <- Waterfall(CNV_SNV_all_patients, mutationHierarchy = myHierarchy8, geneMax=45, plotATally = "complex",plotALayers = newLayerA, plotBTally = "complex", plotBLayers = newLayerB, sampleNames = TRUE, sectionHeights = c(0.2, 0.6, 0.2), sectionWidths = c(0.2, 0.8), plotCLayers = newLayerC)
+
+drawPlot(plotData8)
+
+
+```
+
+```{r WaterfallPlot CNV + mutations des gènes (all cancers) v3 une mutation à la fois}
+
+dd4_organ <- dd4 %>% select(num_inclusion, organ)
+
+CNV_all_patients <- 
+  read.delim(file = "projet_ImmunoProfiler_genomique/projet_ImmunoProfiler_genomique/resultats_CNV_all_patients.txt") %>%
+  mutate(num_inclusion = substring(num_inclusion, first = 2)) %>% # Je conserve les char après la position 2 (après le "p")
+  left_join(dd4_organ, by = "num_inclusion") %>%
+  filter(!is.na(organ))
+
+length(unique(CNV_all_patients$num_inclusion))
+
+SNV_all_patients <- 
+  read.delim(file = "projet_ImmunoProfiler_genomique/projet_ImmunoProfiler_genomique/resultats_SNV_all_patients.txt") %>%
+  mutate(num_inclusion = substring(num_inclusion, first = 2)) %>% # Je conserve les char après la position 2 (après le "p")
+  left_join(dd4_organ, by = "num_inclusion") %>%
+  filter(!is.na(organ))
+
+length(unique(SNV_all_patients$num_inclusion))
+
+# Je crois que les nombres de patient ne sont pas cherent avec le flowchart car mon script ne note pas les patients qui n'ont aucune muattion ! A améliorer !
+
+CNV_SNV_all_patients <- 
+  rbind(CNV_all_patients, SNV_all_patients) %>% 
+  mutate(type_mutation = ifelse(is.na(type_mutation), "NA", type_mutation)) %>%
+  select(num_inclusion, gene, type_mutation) %>%
+  setnames(c("sample", "gene", "mutation")) %>%
+  # filter(mutation != "Pas de mutation", mutation != "NA", mutation != "Gain", mutation != "Délétion") # POur voir les gènes avec le plus de SNV
+  # filter(mutation != "Pas de mutation", mutation != "NA", mutation != "Gain", mutation != "SNV") # Pour voir les gènes avec le plus de CNV type Délétion
+  filter(mutation != "Pas de mutation", mutation != "NA", mutation != "SNV", mutation != "Délétion") #Pour voir les gènes avec le plus de CNV type Gain
+
+
+# myHierarchy8 <- data.table("mutation"=c("SNV"), color=c("#FF9900")) # POur voir les gènes avec le plus de SNV
+# myHierarchy8 <- data.table("mutation"=c("Délétion"), color=c("#046C9A")) # POur voir les gènes avec le plus de CNV type Délétion
+myHierarchy8 <- data.table("mutation"=c("Gain"), color=c("#CC6688")) # POur voir les gènes avec le plus de CNV type Gain
+
+
+newLayerA <- list(theme(axis.text.x=element_text(angle=90, color="black", size=1)))
+newLayerB <- list(theme(axis.text.x=element_text(angle=0, color="black", size=7),
+                        axis.text.y=element_text(angle=0, color="black", size=10)))
+newLayerC <- list(theme(axis.text.x=element_text(angle=90, color="black", size=1)))
+
+plotData8 <- Waterfall(CNV_SNV_all_patients, mutationHierarchy = myHierarchy8, geneMax=45, plotATally = "complex",plotALayers = newLayerA, plotBTally = "complex", plotBLayers = newLayerB, sampleNames = TRUE, sectionHeights = c(0.2, 0.6, 0.2), sectionWidths = c(0.2, 0.8), plotCLayers = newLayerC)
+
+drawPlot(plotData8)
+
+
+```
+
+### Waterfall Plot CSV et mutations (colorectal cancers)
+
+```{r WaterfallPlot CNV + mutations des gènes (colorectal cancers)}
+
+myVars_9bis <- myVars[,1:3]
+myVars9 <- d_info_cnv %>% filter(Categorie_cancer == "Carcinome colorectal")
+myVars9 <- myVars9[,1:3] %>% setnames(c("sample", "gene", "mutation"))
+
+myVars9 <- rbind(myVars_9bis, myVars9) 
+
+myHierarchy9 <- data.table("mutation"=c("missense", "délétion", "gain"), color=c("#FF9900", "#046C9A", "#CC6688")) # Permet de représenter en priorité des types de mutation, ici on a que des mutations Missense donc pas très utile
+
+newLayerA <- list(theme(axis.text.x=element_text(angle=90, color="black", size=1)))
+newLayerB <- list(theme(axis.text.x=element_text(angle=0, color="black", size=10)))
+newLayerC <- list(theme(axis.text.x=element_text(angle=90, color="black", size=1)))
+
+plotData9 <- Waterfall(myVars9, mutationHierarchy = myHierarchy9, geneMax=40, plotATally = "complex",plotALayers = newLayerA, plotBTally = "complex", plotBLayers = newLayerB, sampleNames = TRUE, sectionHeights = c(0.2, 0.6, 0.2), sectionWidths = c(0.2, 0.8), plotCLayers = newLayerC)
+
+drawPlot(plotData9)
+
+
+```
+
+```{r WaterfallPlot CNV + mutations des gènes (colorectal cancers) v2, eval=FALSE}
+
+myVars_SNV_allcancer <- 
+  d_info_mutation %>% 
+  filter(organ == "Digestif") %>%
+  mutate(trv_type = "SNV") %>% 
+  select(c("num_inclusion", "gene_symbol", "trv_type")) %>% 
+  setnames(c("sample", "gene", "mutation"))
+
+myVars_CNV_allcancer <- 
+  d_info_cnv %>%
+  filter(organ == "Digestif") %>%
+  select(c("num_inclusion", "gene", "type_mutation")) %>% 
+  setnames(c("sample", "gene", "mutation"))
+
+myVars_SNV_CNV_allcancer <- rbind(myVars_SNV_allcancer, myVars_CNV_allcancer)
+
+myHierarchy8 <- data.table("mutation"=c("SNV", "délétion", "gain"), color=c("#FF9900", "#046C9A", "#CC6688")) # Permet de représenter en priorité des types de mutation, ici on a que des mutations Missense donc pas très utile
+
+
+newLayerA <- list(theme(axis.text.x=element_text(angle=90, color="black", size=1)))
+newLayerB <- list(theme(axis.text.x=element_text(angle=0, color="black", size=10)))
+newLayerC <- list(theme(axis.text.x=element_text(angle=90, color="black", size=1)))
+
+plotData8 <- Waterfall(myVars_SNV_CNV_allcancer, mutationHierarchy = myHierarchy8, geneMax=60, plotATally = "complex",plotALayers = newLayerA, plotBTally = "complex", plotBLayers = newLayerB, sampleNames = TRUE, sectionHeights = c(0.2, 0.6, 0.2), sectionWidths = c(0.2, 0.8), plotCLayers = newLayerC)
+
+drawPlot(plotData8)
+
+
+```
+
+```{r WaterfallPlot CNV + mutations des gènes (digestifs cancers) v3 toutes les mutations à la fois}
+
+dd4_organ <- dd4 %>% select(num_inclusion, organ)
+
+CNV_all_patients <- 
+  read.delim(file = "projet_ImmunoProfiler_genomique/projet_ImmunoProfiler_genomique/resultats_CNV_all_patients.txt") %>%
+  mutate(num_inclusion = substring(num_inclusion, first = 2)) %>% # Je conserve les char après la position 2 (après le "p")
+  left_join(dd4_organ, by = "num_inclusion") %>%
+  filter(!is.na(organ))
+
+length(unique(CNV_all_patients$num_inclusion))
+
+SNV_all_patients <- 
+  read.delim(file = "projet_ImmunoProfiler_genomique/projet_ImmunoProfiler_genomique/resultats_SNV_all_patients.txt") %>%
+  mutate(num_inclusion = substring(num_inclusion, first = 2)) %>% # Je conserve les char après la position 2 (après le "p")
+  left_join(dd4_organ, by = "num_inclusion") %>%
+  filter(!is.na(organ))
+
+length(unique(SNV_all_patients$num_inclusion))
+
+# Je crois que les nombres de patient ne sont pas cherent avec le flowchart car mon script ne note pas les patients qui n'ont aucune muattion ! A améliorer !
+
+CNV_SNV_colorectal_patients <- 
+  rbind(CNV_all_patients, SNV_all_patients) %>% 
+  mutate(type_mutation = ifelse(is.na(type_mutation), "NA", type_mutation)) %>%
+  filter(organ == "Digestif") %>%
+  select(num_inclusion, gene, type_mutation) %>%
+  setnames(c("sample", "gene", "mutation")) %>%
+  filter(mutation != "Pas de mutation")
+
+myHierarchy8 <- data.table("mutation"=c("SNV", "Délétion", "Gain", "NA"), color=c("#FF9900", "#046C9A", "#CC6688", "grey")) 
+
+
+newLayerA <- list(theme(axis.text.x=element_text(angle=90, color="black", size=10)))
+newLayerB <- list(theme(axis.text.x=element_text(angle=0, color="black", size=7),
+                        axis.text.y=element_text(angle=0, color="black", size=14)))
+newLayerC <- list(theme(axis.text.x=element_text(angle=90, color="black", size=12)))
+
+
+plotData8 <- Waterfall(CNV_SNV_colorectal_patients, mutationHierarchy = myHierarchy8, geneMax=45, plotATally = "complex",plotALayers = newLayerA, plotBTally = "complex", plotBLayers = newLayerB, sampleNames = TRUE, sectionHeights = c(0.2, 0.6, 0.2), sectionWidths = c(0.2, 0.8), plotCLayers = newLayerC)
+
+drawPlot(plotData8)
+
+CNV_SNV_colorectal_patients <- 
+  rbind(CNV_all_patients, SNV_all_patients) %>% 
+  mutate(type_mutation = ifelse(is.na(type_mutation), "NA", type_mutation)) %>%
+  filter(organ == "ORL") %>%
+  select(num_inclusion, gene, type_mutation) %>%
+  setnames(c("sample", "gene", "mutation")) %>%
+  filter(mutation != "Pas de mutation")
+
+myHierarchy8 <- data.table("mutation"=c("SNV", "Délétion", "Gain", "NA"), color=c("#FF9900", "#046C9A", "#CC6688", "grey")) 
+
+newLayerA <- list(theme(axis.text.x=element_text(angle=90, color="black", size=10)))
+newLayerB <- list(theme(axis.text.x=element_text(angle=0, color="black", size=7),
+                        axis.text.y=element_text(angle=0, color="black", size=14)))
+newLayerC <- list(theme(axis.text.x=element_text(angle=90, color="black", size=12)))
+
+plotData8 <- Waterfall(CNV_SNV_colorectal_patients, mutationHierarchy = myHierarchy8, geneMax=45, plotATally = "complex",plotALayers = newLayerA, plotBTally = "complex", plotBLayers = newLayerB, sampleNames = TRUE, sectionHeights = c(0.2, 0.6, 0.2), sectionWidths = c(0.2, 0.8), plotCLayers = newLayerC)
+
+drawPlot(plotData8)
+
+
+```
+
+```{r WaterfallPlot CNV + mutations des gènes (digestifs cancers) v3 toutes les mutations à la fois (plus simple sans les NA mutations)}
+
+dd4_organ <- dd4 %>% select(num_inclusion, organ)
+
+CNV_all_patients <- 
+  read.delim(file = "projet_ImmunoProfiler_genomique/projet_ImmunoProfiler_genomique/resultats_CNV_all_patients.txt") %>%
+  mutate(num_inclusion = substring(num_inclusion, first = 2)) %>% # Je conserve les char après la position 2 (après le "p")
+  left_join(dd4_organ, by = "num_inclusion") %>%
+  filter(!is.na(organ))
+
+length(unique(CNV_all_patients$num_inclusion))
+
+SNV_all_patients <- 
+  read.delim(file = "projet_ImmunoProfiler_genomique/projet_ImmunoProfiler_genomique/resultats_SNV_all_patients.txt") %>%
+  mutate(num_inclusion = substring(num_inclusion, first = 2)) %>% # Je conserve les char après la position 2 (après le "p")
+  left_join(dd4_organ, by = "num_inclusion") %>%
+  filter(!is.na(organ))
+
+length(unique(SNV_all_patients$num_inclusion))
+
+# Je crois que les nombres de patient ne sont pas cherent avec le flowchart car mon script ne note pas les patients qui n'ont aucune muattion ! A améliorer !
+
+CNV_SNV_colorectal_patients <- 
+  rbind(CNV_all_patients, SNV_all_patients) %>% 
+  mutate(type_mutation = ifelse(is.na(type_mutation), "NA", type_mutation)) %>%
+  filter(organ == "Digestif") %>%
+  select(num_inclusion, gene, type_mutation) %>%
+  setnames(c("sample", "gene", "mutation")) %>%
+  filter(mutation != "Pas de mutation", mutation != "NA")
+
+
+myHierarchy8 <- data.table("mutation"=c("SNV", "Délétion", "Gain"), color=c("#FF9900", "#046C9A", "#CC6688")) 
+
+
+newLayerA <- list(theme(axis.text.x=element_text(angle=90, color="black", size=10)))
+newLayerB <- list(theme(axis.text.x=element_text(angle=0, color="black", size=7),
+                        axis.text.y=element_text(angle=0, color="black", size=14)))
+newLayerC <- list(theme(axis.text.x=element_text(angle=90, color="black", size=12)))
+
+
+plotData8 <- Waterfall(CNV_SNV_colorectal_patients, mutationHierarchy = myHierarchy8, geneMax=45, plotATally = "complex",plotALayers = newLayerA, plotBTally = "complex", plotBLayers = newLayerB, sampleNames = TRUE, sectionHeights = c(0.2, 0.6, 0.2), sectionWidths = c(0.2, 0.8), plotCLayers = newLayerC)
+
+drawPlot(plotData8)
+
+
+
+```
+
+```{r WaterfallPlot CNV + mutations des gènes (digestifs cancers) v3 une mutation à la fois}
+dd4_organ <- dd4 %>% select(num_inclusion, organ)
+
+CNV_all_patients <- 
+  read.delim(file = "projet_ImmunoProfiler_genomique/projet_ImmunoProfiler_genomique/resultats_CNV_all_patients.txt") %>%
+  mutate(num_inclusion = substring(num_inclusion, first = 2)) %>% # Je conserve les char après la position 2 (après le "p")
+  left_join(dd4_organ, by = "num_inclusion") %>%
+  filter(!is.na(organ))
+
+length(unique(CNV_all_patients$num_inclusion))
+
+SNV_all_patients <- 
+  read.delim(file = "projet_ImmunoProfiler_genomique/projet_ImmunoProfiler_genomique/resultats_SNV_all_patients.txt") %>%
+  mutate(num_inclusion = substring(num_inclusion, first = 2)) %>% # Je conserve les char après la position 2 (après le "p")
+  left_join(dd4_organ, by = "num_inclusion") %>%
+  filter(!is.na(organ))
+
+length(unique(SNV_all_patients$num_inclusion))
+
+
+CNV_SNV_colorectal_patients <- 
+  rbind(CNV_all_patients, SNV_all_patients) %>% 
+  mutate(type_mutation = ifelse(is.na(type_mutation), "NA", type_mutation)) %>%
+  filter(organ == "Digestif") %>%
+  select(num_inclusion, gene, type_mutation) %>%
+  setnames(c("sample", "gene", "mutation")) %>%
+  filter(mutation != "Pas de mutation") %>%
+  # filter(mutation != "Pas de mutation", mutation != "NA", mutation != "Gain", mutation != "Délétion") # POur voir les gènes avec le plus de SNV
+  filter(mutation != "Pas de mutation", mutation != "NA", mutation != "Gain", mutation != "SNV") # Pour voir les gènes avec le plus de CNV type Délétion
+  # filter(mutation != "Pas de mutation", mutation != "NA", mutation != "SNV", mutation != "Délétion") #Pour voir les gènes avec le plus de CNV type Gain
+
+
+# myHierarchy8 <- data.table("mutation"=c("SNV"), color=c("#FF9900")) # POur voir les gènes avec le plus de SNV
+myHierarchy8 <- data.table("mutation"=c("Délétion"), color=c("#046C9A")) # POur voir les gènes avec le plus de CNV type Délétion
+# myHierarchy8 <- data.table("mutation"=c("Gain"), color=c("#CC6688")) # POur voir les gènes avec le plus de CNV type Gain
+
+
+newLayerA <- list(theme(axis.text.x=element_text(angle=90, color="black", size=10)))
+newLayerB <- list(theme(axis.text.x=element_text(angle=0, color="black", size=10),
+                        axis.text.y=element_text(angle=0, color="black", size=15)))
+newLayerC <- list(theme(axis.text.x=element_text(angle=90, color="black", size=10)))
+
+plotData8 <- Waterfall(CNV_SNV_colorectal_patients, mutationHierarchy = myHierarchy8, geneMax=45, plotATally = "complex",plotALayers = newLayerA, plotBTally = "complex", plotBLayers = newLayerB, sampleNames = TRUE, sectionHeights = c(0.2, 0.6, 0.2), sectionWidths = c(0.2, 0.8), plotCLayers = newLayerC)
+
+drawPlot(plotData8)
+
+```
+
+### Waterfall Plot CSV et mutations (ORL cancers)
+
+```{r WaterfallPlot CNV + mutations des gènes (ORL cancers)}
+
+myVars_10bis <- myVars[,1:3]
+myVars10 <- d_info_cnv %>% filter(Categorie_cancer == "ORL")
+myVars10 <- myVars10[,1:3] %>% setnames(c("sample", "gene", "mutation"))
+
+myVars10 <- rbind(myVars_10bis, myVars10) 
+
+myHierarchy10 <- data.table("mutation"=c("missense", "délétion", "gain"), color=c("#FF9900", "#046C9A", "#CC6688")) # Permet de représenter en priorité des types de mutation, ici on a que des mutations Missense donc pas très utile
+
+
+newLayerA <- list(theme(axis.text.x=element_text(angle=90, color="black", size=1)))
+newLayerB <- list(theme(axis.text.x=element_text(angle=0, color="black", size=10)))
+newLayerC <- list(theme(axis.text.x=element_text(angle=90, color="black", size=1)))
+
+plotData10 <- Waterfall(myVars10, mutationHierarchy = myHierarchy10, geneMax=40, plotATally = "complex",plotALayers = newLayerA, plotBTally = "complex", plotBLayers = newLayerB, sampleNames = TRUE, sectionHeights = c(0.2, 0.6, 0.2), sectionWidths = c(0.2, 0.8), plotCLayers = newLayerC)
+
+drawPlot(plotData10)
+
+
+```
+
+```{r  WaterfallPlot CNV + mutations des gènes (ORL cancers) v3 toutes les mutations à la fois}
+
+dd4_organ <- dd4 %>% select(num_inclusion, organ)
+
+CNV_all_patients <- 
+  read.delim(file = "projet_ImmunoProfiler_genomique/projet_ImmunoProfiler_genomique/resultats_CNV_all_patients.txt") %>%
+  mutate(num_inclusion = substring(num_inclusion, first = 2)) %>% # Je conserve les char après la position 2 (après le "p")
+  left_join(dd4_organ, by = "num_inclusion") %>%
+  filter(!is.na(organ))
+
+length(unique(CNV_all_patients$num_inclusion))
+
+SNV_all_patients <- 
+  read.delim(file = "projet_ImmunoProfiler_genomique/projet_ImmunoProfiler_genomique/resultats_SNV_all_patients.txt") %>%
+  mutate(num_inclusion = substring(num_inclusion, first = 2)) %>% # Je conserve les char après la position 2 (après le "p")
+  left_join(dd4_organ, by = "num_inclusion") %>%
+  filter(!is.na(organ))
+
+length(unique(SNV_all_patients$num_inclusion))
+
+# Je crois que les nombres de patient ne sont pas cherent avec le flowchart car mon script ne note pas les patients qui n'ont aucune muattion ! A améliorer !
+
+CNV_SNV_orl_patients <- 
+  rbind(CNV_all_patients, SNV_all_patients) %>% 
+  mutate(type_mutation = ifelse(is.na(type_mutation), "NA", type_mutation)) %>%
+  filter(organ == "ORL") %>%
+  select(num_inclusion, gene, type_mutation) %>%
+  setnames(c("sample", "gene", "mutation")) %>%
+  filter(mutation != "Pas de mutation")
+
+myHierarchy8 <- data.table("mutation"=c("SNV", "Délétion", "Gain", "NA"), color=c("#FF9900", "#046C9A", "#CC6688", "grey")) # Permet de représenter en priorité des types de mutation, ici on a que des mutations Missense donc pas très utile
+
+
+newLayerA <- list(theme(axis.text.x=element_text(angle=90, color="black", size=1)))
+newLayerB <- list(theme(axis.text.x=element_text(angle=0, color="black", size=7),
+                        axis.text.y=element_text(angle=0, color="black", size=6)))
+newLayerC <- list(theme(axis.text.x=element_text(angle=90, color="black", size=1)))
+
+plotData8 <- Waterfall(CNV_SNV_orl_patients, mutationHierarchy = myHierarchy8, geneMax=45, plotATally = "complex",plotALayers = newLayerA, plotBTally = "complex", plotBLayers = newLayerB, sampleNames = TRUE, sectionHeights = c(0.2, 0.6, 0.2), sectionWidths = c(0.2, 0.8), plotCLayers = newLayerC)
+
+drawPlot(plotData8)
+
+
+
+```
+
+```{r WaterfallPlot CNV + mutations des gènes (ORL cancers) v3 une mutation à la fois}
+dd4_organ <- dd4 %>% select(num_inclusion, organ)
+
+CNV_all_patients <- 
+  read.delim(file = "projet_ImmunoProfiler_genomique/projet_ImmunoProfiler_genomique/resultats_CNV_all_patients.txt") %>%
+  mutate(num_inclusion = substring(num_inclusion, first = 2)) %>% # Je conserve les char après la position 2 (après le "p")
+  left_join(dd4_organ, by = "num_inclusion") %>%
+  filter(!is.na(organ))
+
+length(unique(CNV_all_patients$num_inclusion))
+
+SNV_all_patients <- 
+  read.delim(file = "projet_ImmunoProfiler_genomique/projet_ImmunoProfiler_genomique/resultats_SNV_all_patients.txt") %>%
+  mutate(num_inclusion = substring(num_inclusion, first = 2)) %>% # Je conserve les char après la position 2 (après le "p")
+  left_join(dd4_organ, by = "num_inclusion") %>%
+  filter(!is.na(organ))
+
+length(unique(SNV_all_patients$num_inclusion))
+
+# Je crois que les nombres de patient ne sont pas cherent avec le flowchart car mon script ne note pas les patients qui n'ont aucune muattion ! A améliorer !
+
+CNV_SNV_colorectal_patients <- 
+  rbind(CNV_all_patients, SNV_all_patients) %>% 
+  mutate(type_mutation = ifelse(is.na(type_mutation), "NA", type_mutation)) %>%
+  filter(organ == "ORL") %>%
+  select(num_inclusion, gene, type_mutation) %>%
+  setnames(c("sample", "gene", "mutation")) %>%
+  filter(mutation != "Pas de mutation") %>%
+  filter(mutation != "Pas de mutation", mutation != "NA", mutation != "Gain", mutation != "Délétion") # POur voir les gènes avec le plus de SNV
+  # filter(mutation != "Pas de mutation", mutation != "NA", mutation != "Gain", mutation != "SNV") # Pour voir les gènes avec le plus de CNV type Délétion
+  # filter(mutation != "Pas de mutation", mutation != "NA", mutation != "SNV", mutation != "Délétion") #Pour voir les gènes avec le plus de CNV type Gain
+
+
+myHierarchy8 <- data.table("mutation"=c("SNV"), color=c("#FF9900")) # POur voir les gènes avec le plus de SNV
+# myHierarchy8 <- data.table("mutation"=c("Délétion"), color=c("#046C9A")) # POur voir les gènes avec le plus de CNV type Délétion
+# myHierarchy8 <- data.table("mutation"=c("Gain"), color=c("#CC6688")) # POur voir les gènes avec le plus de CNV type Gain
+
+
+newLayerA <- list(theme(axis.text.x=element_text(angle=90, color="black", size=10)))
+newLayerB <- list(theme(axis.text.x=element_text(angle=0, color="black", size=10),
+                        axis.text.y=element_text(angle=0, color="black", size=15)))
+newLayerC <- list(theme(axis.text.x=element_text(angle=90, color="black", size=10)))
+
+plotData8 <- Waterfall(CNV_SNV_colorectal_patients, mutationHierarchy = myHierarchy8, geneMax=45, plotATally = "complex",plotALayers = newLayerA, plotBTally = "complex", plotBLayers = newLayerB, sampleNames = TRUE, sectionHeights = c(0.2, 0.6, 0.2), sectionWidths = c(0.2, 0.8), plotCLayers = newLayerC)
+
+drawPlot(plotData8)
+
+```
+
+# Multi-Omics Analysis Factor (MOFA)
+
+```{r MOFA propre AVEC groupes de cancer}
+
+# Load le moèle MOFA déja entrainer
+MOFAobject.trained <- load_model("model_MOFA_trained.hdf5")
+
+# Ou pour réentrainer le modèle MOFA : 
+######################################
+# 
+# long_df_immuno <-
+#   dd4 %>% # On prend toutes nos données
+#   select(num_inclusion, all_of(names(dd4)[7:37])) %>%  # On ne garde que la colonne "num_inclusion" et les colonnes immuno_pop_totales (col 7 à 37)
+#   tidyr::pivot_longer(cols = !num_inclusion, names_to = "feature", values_to = "value") %>% # Fait format long du dataframe en répétant les features pour chaque num_inclusion
+#   mutate(view = "I") %>% # On rajoute une colonne "view" qui prend la valeur "I" pour toutes les lignes (I = Immuno)
+#   left_join(dd4 %>% select(num_inclusion, organ), by = "num_inclusion") %>% # On rajoute la colonne "organ" correspondant au type de cancer pour chaque num_inclusion
+#   rename(sample = num_inclusion, group = organ) %>% # On renomme les colonnes de façon à être conforme avec MOFA
+#   mutate(value = log10((value * 1000000 + 1) )) # +1 pour enlever les 0 et 10⁶ pour les unité de cytométrie à vérifier
+
+# Figure rapport : ################################################################################
+# ### Visualisation de l'effet de passer en log pour avoir une belle Gaussienne
+# png("combined_image.png", width = 1600, height = 800)
+# par(mfrow = c(1, 2))
+# 
+# # Sans le log :
+# Sans_Log <- hist(dd5$NK,
+#           xlab = "Values",
+#           ylab = "Fréquence",
+#           main = "Histogramme des valeurs des NK\nsans log transformation")
+
+# # Avec le log :
+# Avec_Log <- hist(log10(dd5$NK * 1000000 +1),
+#           xlab = "Log(Values)",
+#           ylab = "Fréquence",
+#           main = "Histogramme des valeurs des NK\navec log transformation")
+# 
+# dev.off()
+# ################################################################################
+# 
+# 
+# 
+# matrix_missense <-
+#   dd4 %>% # On prend toutes nos données
+#   select(num_inclusion, all_of(names(dd4)[147:239]))  # On ne garde que la colonne "num_inclusion" et les colonnes de mutation missense (col 147 à 239)
+# 
+# # On enleve les gènes qui ont bien trop de NA
+# nbNA_gene <- colSums(is.na(matrix_missense)) # On fait le total des NA pur chaque colonne
+# table(nbNA_gene) # Affiche le nombre de NA par colonne (par gène)
+# matrix_missense_narm <- matrix_missense[ , nbNA_gene < 273] # On enleve les 23 gènes qui on plus de 319 NA (trop de données manquantes (> 25%))
+# 
+# long_df_missense <-
+#   matrix_missense_narm %>% # On prend la matrice de mutation missense nettoyé des gènes avec trop de NA
+#   tidyr::pivot_longer(cols = !num_inclusion, names_to = "feature", values_to = "value") %>% # Fait format long du dataframe en répétant les features pour chaque num_inclusion
+#   mutate(view = "G") %>% # On rajoute une colonne "view" qui prend la valeur "G" pour toutes les lignes (G = Génomique)
+#   left_join(dd4 %>% select(num_inclusion, organ), by = "num_inclusion") %>% # On rajoute la colonne "organ" correspondant au type de cancer pour chaque num_inclusion
+#   rename(sample = num_inclusion, group = organ) # On renomme les colonnes de façon à être conforme avec MOFA
+# 
+# 
+# 
+# matrix_cnv <-
+#   dd4 %>% # On prend toutes nos données
+#   select(num_inclusion, all_of(names(dd4)[240:332]))  # On ne garde que la colonne "num_inclusion" et les colonnes de mutation cnv (col 240 à 332)
+# 
+# # On enleve les gènes qui ont bien trop de NA
+# nbNA_gene <- colSums(is.na(matrix_cnv)) # On fait le total des NA pur chaque colonne
+# table(nbNA_gene) # Affiche le nombre de NA par colonne (par gène)
+# # On a pas de gène qui à beaucoup de NA par contre il y a des certains individus qui n'ont pas de données, on va donc les enlever
+# 
+# nbNA_ind <- apply(matrix_cnv, 1, FUN = function(x) sum(is.na(x))) # On compte le nombre de valeur manquante NA (on regarde la somme) pour chaque ligne (patients) et on stocke ça dans un vecteur
+# table(nbNA_ind) # On regarde ce vecteur (Il y a 167 patients avec des lignes contenant des 93 NA sur les 94 variables !!! On va les enlever)
+# matrix_cnv_narm <- matrix_cnv[nbNA_ind < 93,] # On sélectionne que les ligne du vecteur (les patients) qui ont une somme de NA inférieu à 93 NA
+# 
+# 
+# long_df_cnv <-
+#   matrix_cnv_narm %>% # On prend la matrice de mutation cnv nettoyé des individus avec trop de NA
+#   tidyr::pivot_longer(cols = !num_inclusion, names_to = "feature", values_to = "value") %>% # Fait le format long du dataframe en répétant les features pour chaque num_inclusion
+#   mutate(view = "G") %>% # On rajoute une colonne "view" qui prend la valeur "G" pour toutes les lignes (G = Génomique)
+#   left_join(dd4 %>% select(num_inclusion, organ), by = "num_inclusion") %>% # On rajoute la colonne "organ" correspondant au type de cancer pour chaque num_inclusion
+#   rename(sample = num_inclusion, group = organ) %>% # On renomme les colonnes de façon à être conforme avec MOFA
+#   mutate(value = replace(value, value == -1, 1)) # On remplace les -1 en 1 pour avoir quelque chose binaire mais on perd l'information -1 = délétion et 1 = amplification
+# 
+# 
+# 
+# 
+# 
+# 
+# 
+# 
+# 
+# # On est obligé de clean les noms sinon MOFA pas content
+# clean_names <- function(names) {
+#   names <- gsub("é", "e", names)
+#   names <- gsub("è", "e", names)
+#   names <- gsub("_", "", names)
+#   names <- gsub("\\+", "Plus", names)
+#   names <- gsub("-", "Minus", names)
+#   names <- gsub(" ", "", names)
+#   names <- iconv(names, to="ASCII//TRANSLIT")
+#   return(names)
+# }
+# 
+# # unique(long_df_combined$feature) # Vérifier que les noms ont été changés
+# 
+# 
+# 
+# long_df_combined <-
+#   rbind(long_df_immuno, long_df_missense, long_df_cnv) %>% # On combine les 3 longs data_frame
+#   filter(!is.na(group)) # On filtre les "organ" (group) pour lequels on des NA (9 ptients) sinon cela pose problème
+# 
+# 
+# long_df_combined$feature <- clean_names(long_df_combined$feature) # Applique la fonction de nettoyage aux noms de features + autres colonnes
+# str(long_df_combined) # On vérifie le long data frame combiné
+# 
+# groups <- long_df_combined$group # On stocke les groupe dans un vecteur
+# 
+# 
+# 
+# MOFAobject <- create_mofa(long_df_combined, groups = groups) # On crée l'objet MOFA
+# print(MOFAobject) # On a un récap de l'objet
+# 
+# plot_data_overview(MOFAobject) # On regarde les différentes views de l'objet
+# 
+# 
+# data_opts <- get_default_data_options(MOFAobject)
+# data_opts$scale_views <- TRUE # On scale les views
+# data_opts$scale_groups <- TRUE # On scale les groupes
+# head(data_opts)
+# 
+# 
+# model_opts <- get_default_model_options(MOFAobject)
+# model_opts$likelihoods$G <- "bernoulli" # On a des données binaires donc Bernouilli
+# model_opts$likelihoods$I <- "gaussian" # ON a des données continues donc Gauss
+# model_opts$num_factors <- 15
+# head(model_opts)
+# 
+# 
+# train_opts <- get_default_training_options(MOFAobject)
+# head(train_opts)
+# 
+# # On prepare l'objet MOFA
+# MOFAobject <- prepare_mofa(object = MOFAobject,
+#                            data_options = data_opts,
+#                            model_options = model_opts,
+#                            training_options = train_opts)
+# 
+# outfile = file.path(getwd(),"model_MOFA_trained.hdf5")
+# 
+# 
+# # On entraine le modèle
+# MOFAobject.trained <- run_mofa(MOFAobject, outfile, use_basilisk = TRUE)
+######################################################
+
+
+
+
+
+
+
+
+
+plot_data_overview(MOFAobject.trained) # On regarde les différentes views de l'objet
+
+
+# On ajoute des metadata (age, sexe)
+metadata <- 
+  dd4 %>% 
+  select(sample = num_inclusion, organ, sexe, age) %>%
+  filter(!is.na(organ)) %>%
+  rename(group = organ)
+
+  
+samples_metadata(MOFAobject.trained) <- metadata # On donne ces metadata à l'objet MOFA
+
+plot_factor_cor(MOFAobject.trained) # On regarde la corrélation entre les différents facteurs
+
+VarEx <- plot_variance_explained(MOFAobject.trained, 
+                        x = "view",
+                        y = "factor",
+                        split_by = "group",
+                        plot_total = TRUE,
+                        factors = "all",
+                        min_r2 = 0,
+                        max_r2 = 15,
+                        legend = TRUE,
+                        use_cache = TRUE)
+#VarEx <- VarEx + coord_flip()
+VarEx
+
+
+correlate_factors_with_covariates(MOFAobject.trained, 
+                                  covariates = c("sexe","age"), 
+                                  plot="log_pval")
+
+# On regarde les différent type de facteur
+
+# plot_factor(MOFAobject.trained, 
+#   factors = c(1:5), 
+#   color_by = "age",
+#   shape_by = "sexe",
+# )
+
+library(gridExtra)
+
+# Visualisation des facteurs 1 à 5
+facteur_1_5 <- plot_factor(MOFAobject.trained,
+            factors = c(1:5),
+            groups = "all",
+            color_by = "group",
+            dot_size = 2.5,        # change dot size
+            dodge = T,           # dodge points with different colors
+            legend = F,          # remove legend
+            add_violin = T,      # add violin plots,
+            violin_alpha = 0.25) # transparency of violin plots
+
+facteur_1_5 <- 
+  facteur_1_5 +
+  theme(axis.text.x=element_blank())
+facteur_1_5
+
+# ggsave(filename = "facteur_1_5.png", plot = facteur_1_5, width = 10, height = 8, dpi = 300)
+
+# Visualisation des facteurs 5 à 10
+facteur_6_10 <- plot_factor(MOFAobject.trained,
+            factors = c(6:10),
+            groups = "all",
+            color_by = "group",
+            dot_size = 2.5,        # change dot size
+            dodge = T,           # dodge points with different colors
+            legend = T,          # remove legend
+            add_violin = T,      # add violin plots,
+            violin_alpha = 0.25)  # transparency of violin plots
+
+facteur_6_10 <- 
+  facteur_6_10 +
+  theme(axis.text.x=element_blank())
+facteur_6_10
+
+# ggsave(filename = "facteur_6_10_bis.png", plot = facteur_6_10, width = 10, height = 8, dpi = 300)
+
+# Organiser les graphiques en une grille
+#grid.arrange(facteur_1_5, facteur_5_10, nrow = 2, ncol = 2)
+
+# Visualisation scatter plot avec plot_factors AVEC UN S !!!
+plot_factors(MOFAobject.trained, 
+             factors = c(1:4),
+             show_missing = FALSE,
+             color_by = "sexe",
+             dot_size = 2,        # change dot size
+             legend = T)          # remove legend
+
+
+
+################################################### Caractérisation du facteur 1
+
+# ON regarde les poids de chaque feature dans les facteurs qui expliques le plus la variance dans les view génomique et immuno
+plot_weights(MOFAobject.trained,
+             view = "G",
+             factor = c(1,4,8,9),
+             nfeatures = 10,     # Top number of features to highlight
+             scale = T)           # Scale weights from -1 to 1
+
+P1 <- plot_top_weights(MOFAobject.trained,
+                 view = "G",
+                 factor = c(1),
+                 nfeatures = 30,     # Top number of features to highlight
+                 abs = FALSE,
+                 scale = T,
+                 sign = "all")           # Scale weights from -1 to 1
+P1
+
+ggsave(filename = "P1.png", plot = P1, width = 10, height = 8, dpi = 300)
+
+
+# On fait des heatmeaps
+P1_bis <- plot_data_heatmap(MOFAobject.trained,
+                  view = "G",         # view of interest
+                  factor = 1,             # factor of interest
+                  features = 30,          # number of features to plot (they are selected by weight)
+                  groups = "all",
+                  scale = "row",
+                  cluster_rows = TRUE, 
+                  cluster_cols = TRUE,
+                  show_rownames = TRUE, 
+                  show_colnames = FALSE)
+P1_bis
+
+ggsave(filename = "P1_bis.png", plot = P1_bis, width = 10, height = 8, dpi = 300)
+
+################################################### Caractérisation du facteur 2
+
+plot_weights(MOFAobject.trained,
+             view = "I",
+             factor = c(2),
+             nfeatures = 10,     # Top number of features to highlight
+             scale = T)
+
+P2 <- plot_top_weights(MOFAobject.trained,
+                 view = "I",
+                 factor = c(2),
+                 nfeatures = "all",     # Top number of features to highlight
+                 abs = FALSE,
+                 scale = T,
+                 sign = "all")           # Scale weights from -1 to 1
+P2
+
+# ggsave(filename = "P2.png", plot = P2, width = 10, height = 8, dpi = 300)
+
+
+P2_bis <- plot_data_heatmap(MOFAobject.trained, 
+                  view = "I",
+                  factor = 2,  
+                  features = 31,
+                  groups = "all",
+                  cluster_rows = TRUE, 
+                  cluster_cols = TRUE,
+                  show_rownames = TRUE, 
+                  show_colnames = FALSE,
+                  scale = "row")
+P2_bis
+
+# ggsave(filename = "P2_bis.png", plot = P2_bis, width = 10, height = 8, dpi = 300)
+
+################################################### Caractérisation du facteur 3
+
+plot_weights(MOFAobject.trained,
+             view = "G",
+             factor = 3,
+             nfeatures = 10,     # Top number of features to highlight
+             scale = T)
+
+plot_top_weights(MOFAobject.trained,
+                 view = "G",
+                 factor = 3,
+                 nfeatures = 10,     # Top number of features to highlight
+                 abs = FALSE,
+                 scale = T,
+                 sign = "all")           # Scale weights from -1 to 1
+
+# plot_data_heatmap(MOFAobject.trained,
+#                   view = "G",         # view of interest
+#                   factor = 3,             # factor of interest
+#                   features = 25,          # number of features to plot (they are selected by weight)
+#                   groups = "all",
+#                   scale = "row",
+#                   cluster_rows = TRUE, 
+#                   cluster_cols = TRUE,
+#                   show_rownames = TRUE, 
+#                   show_colnames = FALSE)
+
+################################################### Caractérisation du facteur 4
+
+plot_weights(MOFAobject.trained,
+             view = "I",
+             factor = 4,
+             nfeatures = 10,     # Top number of features to highlight
+             scale = T)
+
+plot_top_weights(MOFAobject.trained,
+                 view = "I",
+                 factor = 4,
+                 nfeatures = 10,     # Top number of features to highlight
+                 abs = FALSE,
+                 scale = T,
+                 sign = "all")           # Scale weights from -1 to 1
+
+plot_data_heatmap(MOFAobject.trained, 
+                  view = "I",
+                  factor = 4,  
+                  features = 25,
+                  groups = "all",
+                  cluster_rows = TRUE, 
+                  cluster_cols = TRUE,
+                  show_rownames = TRUE, 
+                  show_colnames = FALSE,
+                  scale = "row")
+
+
+
+
+
+################################################### Comparaison des facteurs
+
+# On prend les facteur les plus explicatifs pour les 2 panels immuno et génomique (1 et 2)
+
+p <- plot_factors(MOFAobject.trained, 
+  factors = c(1,3),
+  shape_by = "cnvCDKN2A",  
+  color_by = "PolynucleaireNeutrophiles",
+  dot_size = 3,
+  show_missing = F,
+)
+
+p <- p + 
+  geom_hline(yintercept=0, linetype="dashed") +
+  geom_vline(xintercept=(0), linetype="dashed")
+  # facet_wrap(vars(organ))
+
+print(p)
+
+
+
+#############################################
+
+# factors <- get_factors(MOFAobject.trained, 
+#                        groups = "all",
+#                        factors = c(1:15),
+#                        scale = FALSE,
+#                        as.data.frame = FALSE)
+# 
+# LF1 <- get_factors(MOFAobject.trained, 
+#                        groups = "all",
+#                        factors = 1,
+#                        scale = FALSE,
+#                        as.data.frame = TRUE) %>%
+#   select(sample, "LF1" = value)
+# 
+# LF2 <- get_factors(MOFAobject.trained, 
+#                        groups = "all",
+#                        factors = 2,
+#                        scale = FALSE,
+#                        as.data.frame = TRUE) %>%
+#     select(sample, "LF2" = value)
+# 
+# LF3 <- get_factors(MOFAobject.trained, 
+#                        groups = "all",
+#                        factors = 3,
+#                        scale = FALSE,
+#                        as.data.frame = TRUE) %>%
+#   select(sample, "LF3" = value)
+# 
+# LF4 <- get_factors(MOFAobject.trained, 
+#                        groups = "all",
+#                        factors = 4,
+#                        scale = FALSE,
+#                        as.data.frame = TRUE) %>%
+#     select(sample, "LF4" = value)
+# 
+# LFS <- left_join(LF1, LF2) %>% left_join(LF3) %>% left_join(LF4)
+# 
+# dd5 <- left_join(dd4, LFS, by = c("num_inclusion" = "sample"))
+
+
+
+
+
+lf_list <- list() # On initialise une liste pour stocker les résultats
+
+
+# Boucle pour générer les facteurs LF1 à LF15
+for (i in 1:15) {
+  lf_list[[i]] <- get_factors(MOFAobject.trained, 
+                              groups = "all",
+                              factors = i,
+                              scale = FALSE,
+                              as.data.frame = TRUE) %>%
+    select(sample, value) %>%
+    rename(!!paste0("LF", i) := value)
+}
+
+lf_combined <- Reduce(function(x, y) merge(x, y, by = "sample"), lf_list) # fusionner les résultats en un seul data frame
+
+
+dd5 <- left_join(dd4, lf_combined, by = c("num_inclusion" = "sample"))
+
+
+
+################################################################################
+
+
+
+factors_small = dd5[334:348] # On prend pour les 483 patients toutes les données de cytométrie pour chaque cellules
+factors_small_scaled <- scale(factors_small) # On centre et réduit, on scale les données entre elles
+
+nbNA_ind <- apply(factors_small_scaled, 1, FUN = function(x) sum(is.na(x))) # On compte le nombre de valeur manquante NA (on regarde la somme) pour chaque ligne (patients) et on stocke ça dans un vecteur
+table(nbNA_ind) # On regarde ce vecteur (Il y a 9 patients avec des lignes contenant des NA)
+dd5_narm <- dd5[nbNA_ind == 0,] # On sélectionne que les ligne du vecteur (les patients) qui ont une somme de NA valant 0 (patient pour lesquels on a toutes les données)
+
+factors_small_scaled_narm <- factors_small_scaled[nbNA_ind == 0,] # On sélectionne que les ligne les patients) qui ont une somme de NA valant 0 (patient pour lesquels on a toutes les données)
+nrow(factors_small_scaled) # On reaarde le nombre de ligne (patient) pour les données scaled
+# On retrouve nos 492 patients initiaux
+nrow(factors_small_scaled_narm)
+# On regarde le nombre de ligne (patient) pour les données scaled qui N'ONT PAS de données manquantes
+## OK on perd seulement 9 patients avec listwise deletion (En enlevant les 10 patient pour lequels on manque des infos, on obtient 483 patients pour lesquels on a toutes les infos)
+
+
+
+
+
+# CAH avec la distance euclidienne
+# On refait comme avant mais cette fois on classifie les patients avant
+distance <- dist(factors_small_scaled_narm, method = "euclidean") # On calcule la distance euclidienne de chaque point (patient)
+arbre <- hclust(distance, method = "ward.D2") # On réalise le clustering hiérarchique, l'arbre correspondant au distance calculée
+
+inertie <- sort(arbre$height, decreasing = TRUE) # Trie les hauteurs des fusions dans l'arbre de clustering, qui représentent l'inertie (ou la variance) au moment de la fusion de deux clusters. L'inertie est triée par ordre décroissant pour identifier les plus grands sauts d'inertie, qui indiquent des points naturels pour considérer la séparation des clusters.
+ELBO <- plot(inertie[1:50], type = "s", xlab = "Nombre de classes", ylab = "Inertie") # Visualise les 50 premiers niveaux d'inertie pour aider à identifier le nombre optimal de clusters à retenir. Le type "s" crée un graphique en escalier, qui aide à visualiser clairement les sauts d'inertie.
+# La hauteur de l'arbre représente l'inertie
+
+
+## saut d'inertie à k = 9
+k_sel <- 9
+ELBO <- ELBO + points(k_sel, inertie[k_sel], col = "blue") # Marque le point sur le graphique où le saut d'inertie à k = 9 est observé. Ceci est sélectionné comme le nombre optimal de clusters. Nombre de cluster = 9
+ELBO
+
+# ggsave(filename = "ELBO.png", plot = ELBO, width = 10, height = 8, dpi = 300)
+
+mycolor_inverse <- c(
+  "#008000",  # Vert foncé
+  "#808000",  # Olive
+  "#800000",  # Marron
+  "#00FFFF",  # Cyan
+  "#FF00FF",  # Magenta
+  "#FFFF00",  # Jaune
+  "#0000FF",  # Bleu
+  "#00FF00",  # Vert
+  "#FF0000"   # Rouge
+)
+
+dendrogramme <- factoextra::fviz_dend(arbre, k = k_sel, show_labels = F, rect = TRUE, k_colors = mycolor_inverse, color_labels_by_k = T, main = "Dendrogramme des clusters", xlab = "Clusters", ylab = "Hauteur") #On crée l'arbre (avec des rectangles délimitants et sans labels)
+dendrogramme
+
+# ggsave(filename = "dendrogramme.png", plot = dendrogramme, width = 10, height = 8, dpi = 300)
+
+
+cluster_factor <- cutree(arbre, k_sel) # Récupere dans typo les différent cluster à k = 9
+
+
+
+dd5_narm$cluster_factor <- factor(cluster_factor) # Rajoute la colonne typo à d_cyto_narm
+
+freq(cluster_factor)
+
+
+
+###############################################################################
+
+dd5_narm %>%
+  ggplot(aes(x= LF1,
+             y = LF2,
+             color = cluster_factor)) +
+  geom_point() +
+  facet_wrap(vars(organ)) +
+  theme_bw() +
+  theme(legend.position = "right")
+
+dd5_narm %>%
+  ggplot(aes(x= LF1,
+             y = LF4,
+             color = cluster_factor)) +
+  geom_point() +
+  facet_wrap(vars(organ)) +
+  theme_bw() +
+  theme(legend.position = "right")
+
+
+dd5_narm %>%
+  ggplot(aes(x= LF3,
+             y = LF4,
+             color = cluster_factor)) +
+  geom_point() +
+  facet_wrap(vars(organ)) +
+  theme_bw() +
+  theme(legend.position = "right")
+
+dd5_narm %>%
+  ggplot(aes(x= LF2,
+             y = LF3,
+             color = cluster_factor)) +
+  geom_point() +
+  facet_wrap(vars(organ)) +
+  theme_bw() +
+  theme(legend.position = "right")
+
+################################################################################
+
+#### Le profil génomique :
+
+# Les facteurs 1 & 3
+
+dd5_narm %>%
+  ggplot(aes(x= LF1,
+             y = LF3,
+             color = cluster_factor)) +
+  geom_point() +
+  facet_wrap(vars(organ)) +
+  theme_bw() +
+  theme(legend.position = "right")
+
+# Les facteurs 7 & 9
+
+dd5_narm %>%
+  ggplot(aes(x= LF7,
+             y = LF9,
+             color = cluster_factor)) +
+  geom_point() +
+  facet_wrap(vars(organ)) +
+  theme_bw() +
+  theme(legend.position = "right")
+
+
+
+#### Le profil immuno :
+
+# Les facteurs 2 & 4
+
+dd5_narm %>%
+  ggplot(aes(x= LF2,
+             y = LF4,
+             color = cluster_factor)) +
+  geom_point() +
+  facet_wrap(vars(organ)) +
+  theme_bw() +
+  theme(legend.position = "right")
+
+# Les facteurs 5 & 6
+
+dd5_narm %>%
+  ggplot(aes(x= LF5,
+             y = LF6,
+             color = cluster_factor)) +
+  geom_point() +
+  facet_wrap(vars(organ)) +
+  theme_bw() +
+  theme(legend.position = "right")
+
+################################################################################
+
+metadata <- 
+  dd5_narm %>% 
+  select(sample = num_inclusion, organ, sexe, age, cluster_factor) %>%
+  filter(!is.na(organ)) %>%
+  rename(group = organ)
+
+samples_metadata(MOFAobject.trained) <- metadata # On donne ces metadata à l'objet MOFA
+
+
+set.seed(42)
+MOFAobject.trained <- run_tsne(MOFAobject.trained)
+
+
+d_TSNE <- MOFAobject.trained@dim_red$TSNE
+dd6 <- left_join(dd5_narm, d_TSNE, by = c("num_inclusion" = "sample"))
+
+# mycolor <- ggsci::pal_npg("nrc")(7)
+# mycolor <- brewer.pal(11, "Set1")
+# mycolor_bis <- c("red", "blue", "green", "purple", "grey", "black", "yellow", "orange", "maroon", "darkgreen")
+# mycolor_inverse <- c(
+#   "#A52A2A",  # Brun
+#   "#FFA500",  # Orange
+#   "#000080",  # Bleu marine
+#   "#008080",  # Sarcelle
+#   "#800080",  # Violet foncé
+#   "#008000",  # Vert foncé
+#   "#808000",  # Olive
+#   "#800000",  # Marron
+#   "#00FFFF",  # Cyan
+#   "#FF00FF",  # Magenta
+#   "#FFFF00",  # Jaune
+#   "#0000FF",  # Bleu
+#   "#00FF00",  # Vert
+#   "#FF0000"   # Rouge
+# )
+
+mycolor <- c(
+  "#FF0000",   # Rouge
+  "#00FF00",  # Vert
+  "#0000FF",  # Bleu
+  "#FFFF00",  # Jaune
+  "#FF00FF",  # Magenta
+  "#00FFFF",  # Cyan
+  "#800000",  # Marron
+  "#808000",  # Olive
+  "#008000"  # Vert foncé
+)
+
+dd6 %>% 
+  ggplot(aes(x = TSNE1, y = TSNE2, color = cluster_factor)) + 
+  geom_point() + 
+  scale_color_manual(values = mycolor) +
+  # facet_wrap(vars(organ)) +
+  theme_bw() 
+
+
+
+# 
+# TSNE <- plot_dimred(MOFAobject.trained,
+#   method = "TSNE",
+#   color_by = "cluster_factor",
+#   dot_size = 3)
+# 
+# TSNE + scale_fill_manual(values = mycolor)
+#   
+
+
+
+
+
+
+MOFAobject.trained <- run_umap(MOFAobject.trained, min_dist = 0.01, n_neighbors = 10)
+
+d_UMAP <- MOFAobject.trained@dim_red$UMAP
+dd6 <- left_join(dd6, d_UMAP, by = c("num_inclusion" = "sample"))
+
+dd6 %>% 
+  ggplot(aes(x = UMAP1, y = UMAP2, color = cluster_factor)) + 
+  geom_point() + 
+  scale_color_manual(values = mycolor) +
+  facet_wrap(vars(organ)) +
+  theme_bw() 
+
+# plot_dimred(MOFAobject.trained, method="UMAP", color_by = "cluster_factor", dot_size = 3) + scale_fill_manual(values = mycolor)
+
+
+
+UMAP_total <- dd6 %>% 
+  ggplot(aes(x = UMAP1, y = UMAP2, color = cluster_factor)) + 
+  geom_point() + 
+  scale_color_manual(values = mycolor) +
+  # facet_wrap(vars(organ)) +
+  theme_bw() 
+UMAP_total
+
+# ggsave(filename = "UMAP_total.png", plot = UMAP_total, width = 10, height = 8, dpi = 300)
+
+UMAP_organ <- dd6 %>% 
+  ggplot(aes(x = UMAP1, y = UMAP2, color = cluster_factor)) + 
+  geom_point() + 
+  scale_color_manual(values = mycolor) +
+  facet_wrap(vars(organ)) +
+  theme_bw() 
+UMAP_organ
+
+# ggsave(filename = "UMAP_organ.png", plot = UMAP_organ, width = 10, height = 8, dpi = 300)
+
+# plot_dimred(MOFAobject.trained, method="UMAP", color_by = "cluster_factor", dot_size = 3) + scale_fill_manual(values = mycolor)
+
+table_contingence <- as.data.frame(table(dd6$organ, dd6$cluster_factor))
+table_contingence
+
+ggplot(table_contingence, aes(x = Var1, y = Freq, fill = Var2)) +
+  geom_bar(stat = "identity") +
+  # coord_polar("y", start=0) +
+  labs(x = "Organ", y = "Frequency", fill = "Cluster Factor") +
+  theme_minimal() +
+  scale_fill_manual(values = mycolor)
+
+
+ggplot(table_contingence, aes(x = Var1, y = Freq, fill = Var2)) +
+  geom_bar(stat = "identity") +
+  coord_polar("y", start=0) +
+  labs(x = "Organ", y = "Frequency", fill = "Cluster Factor") +
+  theme_minimal() +  
+  scale_fill_manual(values = mycolor)
+
+
+
+
+# Calcul des pourcentages
+table_contingence$Percentage <- with(table_contingence, Freq / sum(Freq) * 100)
+
+ggplot(table_contingence, aes(x = Var1, y = Percentage, fill = Var2)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Organ", y = "Percentage", fill = "Cluster Factor") +
+  theme_minimal() +
+  scale_fill_manual(values = mycolor) +
+  ggtitle("Pourcentage des Clusters par Organ")
+
+ggplot(table_contingence, aes(x = Var1, y = Percentage, fill = Var2)) +
+  geom_bar(stat = "identity") +
+  coord_polar("y", start=0) +
+  labs(x = "Organ", y = "Percentage", fill = "Cluster Factor") +
+  theme_minimal() +
+  scale_fill_manual(values = mycolor)
+
+dd6 %>% 
+  ggplot(aes(x = organ, fill = cluster_factor)) + 
+  geom_bar(position = "stack")
+
+n_by_organ <- dd6 %>% 
+  group_by(organ) %>% 
+  summarise(effectif_tot = n()) 
+
+tab <- dd6 %>% 
+  group_by(organ, cluster_factor) %>% 
+  summarise(effectif = n()) %>% 
+  left_join(n_by_organ) %>% 
+  mutate("pct_by_organ" = effectif/effectif_tot * 100)
+
+tab %>% 
+  ggplot(aes(x = organ, y = pct_by_organ, fill = cluster_factor)) + 
+  geom_bar(stat = "identity", position = "stack") + 
+  coord_flip()
+
+tab %>% 
+  ggplot(aes(x = cluster_factor, y = pct_by_organ, fill = cluster_factor)) + 
+  geom_bar(stat = "identity", position = position_dodge()) + 
+  coord_flip()+
+  facet_wrap(vars(organ))
+
+mycolor <- c(
+  "#FF0000",   # Rouge
+  "#00FF00",  # Vert
+  "#0000FF",  # Bleu
+  "#FFFF00",  # Jaune
+  "#FF00FF",  # Magenta
+  "#00FFFF",  # Cyan
+  "#800000",  # Marron
+  "#808000",  # Olive
+  "#008000"  # Vert foncé
+)
+
+
+
+barplot_cluster_organ <- tab %>% 
+  ggplot(aes(x = organ, y = pct_by_organ, fill = cluster_factor)) + 
+  geom_bar(stat = "identity", position = position_dodge()) + 
+  coord_flip() +
+  facet_wrap(vars(cluster_factor)) +
+  scale_fill_manual(values = mycolor)
+
+barplot_cluster_organ
+
+# ggsave(filename = "barplot_cluster_organ.png", plot = barplot_cluster_organ, width = 10, height = 8, dpi = 300)
+
+
+# Charger la bibliothèque
+library(fmsb)
+
+
+# Fonction pour préparer les données et générer le radarchart
+create_radarchart <- function(data, title, mycolor) {
+  dataa <- as.data.frame(matrix(data$pct_by_organ, ncol=9))
+  colnames(dataa) <- c("Cluster1" , "Cluster2" , "Cluster3" , "Cluster4" , "Cluster5", "Cluster6" , "Cluster7", "Cluster8", "Cluster9")
+  
+  # Ajoute les lignes max et min
+  data_chart <- rbind(rep(100,9), rep(0,9), dataa)
+  
+  # Créer le radarchart
+  radarchart(data_chart, title=title, axistype=1 , 
+ 
+    #custom polygon
+    pcol=mycolor , pfcol=mycolor , plwd=4 , 
+ 
+    #custom the grid
+    cglcol="grey", cglty=1, axislabcol="grey", caxislabels=seq(0,12,5), cglwd=0.8,
+ 
+    #custom labels
+    vlcex=0.8 
+    )
+}
+
+# Pour préparer la mise en page de plusieurs graphiques
+# par(mfrow=c(3, 4))  # 3 lignes, 4 colonnes
+
+
+
+
+# mycolor <- c("#FF0000", "#00FF00", "#0000FF", "#FFFF00", "#FF00FF", "#00FFFF", "#800000", "#008000", "#000080", "#808000", "#800080")
+mycolor <- c(
+  "#FF0000",   # Rouge
+  "#00FF00",  # Vert
+  "#0000FF",  # Bleu
+  "#FFFF00",  # Jaune
+  "#FF00FF",  # Magenta
+  "#00FFFF",  # Cyan
+  "#800000",  # Marron
+  "#808000",  # Olive
+  "#008000"  # Vert foncé
+)
+
+
+# Ajouter la transparence
+add_transparency <- function(color, alpha) {
+  adjustcolor(color, alpha.f = alpha)
+}
+
+# Générer les radarcharts avec transparence
+create_radarchart(tab %>% filter(organ == "Digestif"), "Digestif", add_transparency(mycolor[1], 0.5))
+create_radarchart(tab %>% filter(organ == "Autres"), "Autres", add_transparency(mycolor[2], 0.5))
+create_radarchart(tab %>% filter(organ == "ORL"), "ORL", add_transparency(mycolor[3], 0.5))
+create_radarchart(tab %>% filter(organ == "Systeme_nerveux_central"), "Systeme nerveux central", add_transparency(mycolor[4], 0.5))
+create_radarchart(tab %>% filter(organ == "Genital_femme"), "Genital femme", add_transparency(mycolor[5], 0.5))
+create_radarchart(tab %>% filter(organ == "Pancréas"), "Pancréas", add_transparency(mycolor[6], 0.5))
+create_radarchart(tab %>% filter(organ == "Poumon"), "Poumon", add_transparency(mycolor[7], 0.5))
+create_radarchart(tab %>% filter(organ == "Voies urinaires"), "Voies urinaires", add_transparency(mycolor[8], 0.5))
+create_radarchart(tab %>% filter(organ == "Genital_homme"), "Genital homme", add_transparency(mycolor[9], 0.5))
+create_radarchart(tab %>% filter(organ == "Sarcome"), "Sarcome", add_transparency(mycolor[10], 0.5))
+create_radarchart(tab %>% filter(organ == "Sein"), "Sein", add_transparency(mycolor[11], 0.5))
+
+
+
+
+# Caractériser les cluster en fonction des 15 facteurs
+
+tab2 <- dd6 %>% 
+  group_by(cluster_factor) %>% 
+  summarise(LF1 = mean(LF1),
+            LF2 = mean(LF2),
+            LF3 = mean(LF3),
+            LF4 = mean(LF4),
+            LF5 = mean(LF5),
+            LF6 = mean(LF6),
+            LF7 = mean(LF7),
+            LF8 = mean(LF8),
+            LF9 = mean(LF9),
+            LF10 = mean(LF10),
+            LF11 = mean(LF11),
+            LF12 = mean(LF12),
+            LF13 = mean(LF13),
+            LF14 = mean(LF14),
+            LF15 = mean(LF15),) %>% 
+  tidyr::pivot_longer(cols = starts_with("LF"), names_to = "LF", values_to = "mean")
+
+
+
+geom_bar_cluster_LF <- tab2 %>% 
+  mutate(LF = forcats::fct_relevel(LF, paste0("LF", 1:15))) %>% 
+  ggplot(aes(x = mean, y = LF, fill = LF)) + 
+  geom_bar(stat = "identity", position = position_dodge()) + 
+  coord_flip()+
+  facet_wrap(vars(cluster_factor)) +
+  theme(axis.text.x=element_text(angle=90, color="black", size=7))
+geom_bar_cluster_LF
+
+ggsave(filename = "geom_bar_cluster_LF.png", plot = geom_bar_cluster_LF, width = 10, height = 8, dpi = 300)
+
+
+tab2 %>% 
+  mutate(LF = forcats::fct_relevel(LF, paste0("LF", 1:15))) %>% 
+  ggplot(aes(x = LF, y = mean, color = LF)) + 
+  geom_point(size = 2) + 
+  geom_line(aes(group = cluster_factor)) + 
+  facet_wrap(vars(cluster_factor)) + 
+  theme(axis.text.x=element_text(angle=90, color="black", size=7))
+
+
+
+
+
+
+
+
+
+```
+
+
+
+```{r Top contributeurs des 15 facteurs latents}
+
+# Pour faire le tableau des top contributeurs
+plot_top_weights(MOFAobject.trained,
+                 view = c("G","I"),
+                 factor = 1,
+                 nfeatures = 5,     # Top number of features to highlight
+                 abs = TRUE,
+                 scale = T,
+                 sign = "all") 
+plot_top_weights(MOFAobject.trained,
+                 view = c("G","I"),
+                 factor = 2,
+                 nfeatures = 5,     # Top number of features to highlight
+                 abs = TRUE,
+                 scale = T,
+                 sign = "all") 
+plot_top_weights(MOFAobject.trained,
+                 view = c("G","I"),
+                 factor = 3,
+                 nfeatures = 5,     # Top number of features to highlight
+                 abs = TRUE,
+                 scale = T,
+                 sign = "all") 
+plot_top_weights(MOFAobject.trained,
+                 view = c("G","I"),
+                 factor = 4,
+                 nfeatures = 5,     # Top number of features to highlight
+                 abs = TRUE,
+                 scale = T,
+                 sign = "all") 
+plot_top_weights(MOFAobject.trained,
+                 view = c("G","I"),
+                 factor = 5,
+                 nfeatures = 5,     # Top number of features to highlight
+                 abs = TRUE,
+                 scale = T,
+                 sign = "all") 
+plot_top_weights(MOFAobject.trained,
+                 view = c("G","I"),
+                 factor = 6,
+                 nfeatures = 5,     # Top number of features to highlight
+                 abs = TRUE,
+                 scale = T,
+                 sign = "all") 
+plot_top_weights(MOFAobject.trained,
+                 view = c("G","I"),
+                 factor = 7,
+                 nfeatures = 5,     # Top number of features to highlight
+                 abs = TRUE,
+                 scale = T,
+                 sign = "all") 
+plot_top_weights(MOFAobject.trained,
+                 view = c("G","I"),
+                 factor = 8,
+                 nfeatures = 5,     # Top number of features to highlight
+                 abs = TRUE,
+                 scale = T,
+                 sign = "all") 
+plot_top_weights(MOFAobject.trained,
+                 view = c("G","I"),
+                 factor = 9,
+                 nfeatures = 5,     # Top number of features to highlight
+                 abs = TRUE,
+                 scale = T,
+                 sign = "all") 
+plot_top_weights(MOFAobject.trained,
+                 view = c("G","I"),
+                 factor = 10,
+                 nfeatures = 5,     # Top number of features to highlight
+                 abs = TRUE,
+                 scale = T,
+                 sign = "all") 
+plot_top_weights(MOFAobject.trained,
+                 view = c("G","I"),
+                 factor = 11,
+                 nfeatures = 5,     # Top number of features to highlight
+                 abs = TRUE,
+                 scale = T,
+                 sign = "all") 
+plot_top_weights(MOFAobject.trained,
+                 view = c("G","I"),
+                 factor = 12,
+                 nfeatures = 5,     # Top number of features to highlight
+                 abs = TRUE,
+                 scale = T,
+                 sign = "all") 
+plot_top_weights(MOFAobject.trained,
+                 view = c("G","I"),
+                 factor = 13,
+                 nfeatures = 5,     # Top number of features to highlight
+                 abs = TRUE,
+                 scale = T,
+                 sign = "all") 
+plot_top_weights(MOFAobject.trained,
+                 view = c("G","I"),
+                 factor = 14,
+                 nfeatures = 5,     # Top number of features to highlight
+                 abs = TRUE,
+                 scale = T,
+                 sign = "all") 
+plot_top_weights(MOFAobject.trained,
+                 view = c("G","I"),
+                 factor = 15,
+                 nfeatures = 5,     # Top number of features to highlight
+                 abs = TRUE,
+                 scale = T,
+                 sign = "all") 
+
+
+
+```
+
+```{r test pour imputer les données manquantes}
+
+MOFAobject_imputed_data <- impute(MOFAobject.trained, views = "all", groups = "all")
+
+plot_data_overview(MOFAobject_imputed_data) # On regarde les différentes views de l'objet
+
+```
+
+```{r Graphiques des variances cumulées}
+
+# Charger les données de variance
+Variance_Digestifs <- as.data.frame(MOFAobject.trained@cache[["variance_explained"]][["r2_per_factor"]][["Digestif"]])
+Variance_Autres <- as.data.frame(MOFAobject.trained@cache[["variance_explained"]][["r2_per_factor"]][["Autres"]])
+Variance_Systeme_nerveux_central <- as.data.frame(MOFAobject.trained@cache[["variance_explained"]][["r2_per_factor"]][["Systeme_nerveux_central"]])
+Variance_ORL <- as.data.frame(MOFAobject.trained@cache[["variance_explained"]][["r2_per_factor"]][["ORL"]])
+Variance_Genital_femme <- as.data.frame(MOFAobject.trained@cache[["variance_explained"]][["r2_per_factor"]][["Genital_femme"]])
+Variance_Pancréas <- as.data.frame(MOFAobject.trained@cache[["variance_explained"]][["r2_per_factor"]][["Pancréas"]])
+Variance_Poumon <- as.data.frame(MOFAobject.trained@cache[["variance_explained"]][["r2_per_factor"]][["Poumon"]])
+Variance_Genital_homme <- as.data.frame(MOFAobject.trained@cache[["variance_explained"]][["r2_per_factor"]][["Genital_homme"]])
+Variance_Voies_urinaires <- as.data.frame(MOFAobject.trained@cache[["variance_explained"]][["r2_per_factor"]][["Voies urinaires"]])
+Variance_Sarcome <- as.data.frame(MOFAobject.trained@cache[["variance_explained"]][["r2_per_factor"]][["Sarcome"]])
+Variance_Sein <- as.data.frame(MOFAobject.trained@cache[["variance_explained"]][["r2_per_factor"]][["Sein"]])
+
+# Ajouter les noms de facteurs
+factors <- factor(paste0("Factor", 1:15), levels = paste0("Factor", 1:15))
+
+# Calculer la variance cumulée pour chaque colonne et ajouter une colonne de catégorie
+calculate_cumulative <- function(df, category) {
+  df$Factor <- factors
+  df$Cumulative_GI <- cumsum(df$G + df$I)
+  df$Cumulative_G <- cumsum(df$G)
+  df$Cumulative_I <- cumsum(df$I)
+  df$Category <- category
+  return(df[, c("Factor", "Cumulative_GI", "Cumulative_G", "Cumulative_I", "Category")])
+}
+
+Variance_TT_Digestifs <- as.data.frame(MOFAobject.trained@cache[["variance_explained"]][["r2_per_factor"]][["Digestif"]])
+Variance_TT_Autres <- as.data.frame(MOFAobject.trained@cache[["variance_explained"]][["r2_per_factor"]][["Autres"]])
+Variance_TT_Systeme_nerveux_central <- as.data.frame(MOFAobject.trained@cache[["variance_explained"]][["r2_per_factor"]][["Systeme_nerveux_central"]])
+Variance_TT_ORL <- as.data.frame(MOFAobject.trained@cache[["variance_explained"]][["r2_per_factor"]][["ORL"]])
+Variance_TT_Genital_femme <- as.data.frame(MOFAobject.trained@cache[["variance_explained"]][["r2_per_factor"]][["Genital_femme"]])
+Variance_TT_Pancréas <- as.data.frame(MOFAobject.trained@cache[["variance_explained"]][["r2_per_factor"]][["Pancréas"]])
+Variance_TT_Poumon <- as.data.frame(MOFAobject.trained@cache[["variance_explained"]][["r2_per_factor"]][["Poumon"]])
+Variance_TT_Genital_homme <- as.data.frame(MOFAobject.trained@cache[["variance_explained"]][["r2_per_factor"]][["Genital_homme"]])
+Variance_TT_Voies_urinaires <- as.data.frame(MOFAobject.trained@cache[["variance_explained"]][["r2_per_factor"]][["Voies urinaires"]])
+Variance_TT_Sarcome <- as.data.frame(MOFAobject.trained@cache[["variance_explained"]][["r2_per_factor"]][["Sarcome"]])
+Variance_TT_Sein <- as.data.frame(MOFAobject.trained@cache[["variance_explained"]][["r2_per_factor"]][["Sein"]])
+
+Variance_Digestifs <- calculate_cumulative(Variance_Digestifs, "Digestif")
+Variance_Autres <- calculate_cumulative(Variance_Autres, "Autres")
+Variance_Systeme_nerveux_central <- calculate_cumulative(Variance_Systeme_nerveux_central, "Systeme_nerveux_central")
+Variance_ORL <- calculate_cumulative(Variance_ORL, "ORL")
+Variance_Genital_femme <- calculate_cumulative(Variance_Genital_femme, "Genital_femme")
+Variance_Pancréas <- calculate_cumulative(Variance_Pancréas, "Pancréas")
+Variance_Poumon <- calculate_cumulative(Variance_Poumon, "Poumon")
+Variance_Genital_homme <- calculate_cumulative(Variance_Genital_homme, "Genital_homme")
+Variance_Voies_urinaires <- calculate_cumulative(Variance_Voies_urinaires, "Voies_urinaires")
+Variance_Sarcome <- calculate_cumulative(Variance_Sarcome, "Sarcome")
+Variance_Sein <- calculate_cumulative(Variance_Sein, "Sein")
+
+# Combiner tous les dataframes en un seul
+Variance_Combined <- rbind(
+  Variance_Digestifs, Variance_Autres, Variance_Systeme_nerveux_central, 
+  Variance_ORL, Variance_Genital_femme, Variance_Pancréas, 
+  Variance_Poumon, Variance_Genital_homme, Variance_Voies_urinaires, 
+  Variance_Sarcome, Variance_Sein
+)
+
+library(ggplot2)
+library(gridExtra)
+
+# plot1 <- ggplot(Variance_Combined, aes(x = Factor, y = Cumulative_G, color = Category, group = Category)) +
+#   geom_line(size = 1) +
+#   geom_point() +
+#   labs(title = "Variance Cumulée par Facteur (G)",
+#        x = "Facteur",
+#        y = "Variance Cumulée (G)",
+#        color = "Catégorie") +
+#   theme_minimal() +
+#   theme(axis.text.x = element_text(angle = 45, hjust = 1))
+# 
+# plot2 <- ggplot(Variance_Combined, aes(x = Factor, y = Cumulative_I, color = Category, group = Category)) +
+#   geom_line(size = 1) +
+#   geom_point() +
+#   labs(title = "Variance Cumulée par Facteur (I)",
+#        x = "Facteur",
+#        y = "Variance Cumulée (I)",
+#        color = "Catégorie") +
+#   theme_minimal() +
+#   theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+plot3 <- ggplot(Variance_Combined, aes(x = Factor, y = Cumulative_GI, color = Category, group = Category)) +
+  geom_line(size = 1) +
+  geom_point() +
+  labs(title = "Variance Cumulée par Facteur (G + I)",
+       x = "Facteur",
+       y = "Variance Cumulée (G + I)",
+       color = "Catégorie") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+plot3
+
+# Organiser les graphiques en une grille
+# grid.arrange(plot1, plot2, plot3, nrow = 2, ncol = 2)
+
+
+
+
+
+
+
+
+
+```
+
+```{r MOFA TSNE sur les 10 facteurs plutôt que 15}
+
+
+# Load le moèle MOFA déja entrainer
+MOFAobject.trained <- load_model("model_MOFA_trained.hdf5")
+
+
+
+
+
+plot_data_overview(MOFAobject.trained) # On regarde les différentes views de l'objet
+
+
+# On ajoute des metadata (age, sexe)
+metadata <- 
+  dd4 %>% 
+  select(sample = num_inclusion, organ, sexe, age) %>%
+  filter(!is.na(organ)) %>%
+  rename(group = organ)
+
+  
+samples_metadata(MOFAobject.trained) <- metadata # On donne ces metadata à l'objet MOFA
+
+
+lf_list <- list() # On initialise une liste pour stocker les résultats
+
+
+# Boucle pour générer les facteurs LF1 à LF15
+for (i in 1:10) {
+  lf_list[[i]] <- get_factors(MOFAobject.trained, 
+                              groups = "all",
+                              factors = i,
+                              scale = FALSE,
+                              as.data.frame = TRUE) %>%
+    select(sample, value) %>%
+    rename(!!paste0("LF", i) := value)
+}
+
+lf_combined <- Reduce(function(x, y) merge(x, y, by = "sample"), lf_list) # On fusionne les résultats en un seul data frame
+
+
+dd5_bis <- left_join(dd4, lf_combined, by = c("num_inclusion" = "sample"))
+
+
+
+################################################################################
+
+
+
+factors_small = dd5_bis[334:343] # On prend pour les 483 patients toutes les données de cytométrie pour chaque cellules
+factors_small_scaled <- scale(factors_small) # On centre et réduit, on scale les données entre elles
+
+nbNA_ind <- apply(factors_small_scaled, 1, FUN = function(x) sum(is.na(x))) # On compte le nombre de valeur manquante NA (on regarde la somme) pour chaque ligne (patients) et on stocke ça dans un vecteur
+table(nbNA_ind) # On regarde ce vecteur (Il y a 9 patients avec des lignes contenant des NA)
+dd5_bis_narm <- dd5_bis[nbNA_ind == 0,] # On sélectionne que les ligne du vecteur (les patients) qui ont une somme de NA valant 0 (patient pour lesquels on a toutes les données)
+
+factors_small_scaled_narm <- factors_small_scaled[nbNA_ind == 0,] # On sélectionne que les ligne les patients) qui ont une somme de NA valant 0 (patient pour lesquels on a toutes les données)
+nrow(factors_small_scaled) # On reaarde le nombre de ligne (patient) pour les données scaled
+# On retrouve nos 492 patients initiaux
+nrow(factors_small_scaled_narm)
+# On regarde le nombre de ligne (patient) pour les données scaled qui N'ONT PAS de données manquantes
+## OK on perd seulement 9 patients avec listwise deletion (En enlevant les 10 patient pour lequels on manque des infos, on obtient 483 patients pour lesquels on a toutes les infos)
+
+
+
+
+
+# CAH avec la distance euclidienne
+# On refait comme avant mais cette fois on classifie les patient avant
+distance <- dist(factors_small_scaled_narm, method = "euclidean") # On calcule la distance euclidienne de chaque point (patient)
+arbre <- hclust(distance, method = "ward.D2") # On réalise le clustering hiérarchique, l'arbre correspondant au distance calculée
+
+inertie <- sort(arbre$height, decreasing = TRUE) # Trie les hauteurs des fusions dans l'arbre de clustering, qui représentent l'inertie (ou la variance) au moment de la fusion de deux clusters. L'inertie est triée par ordre décroissant pour identifier les plus grands sauts d'inertie, qui indiquent des points naturels pour considérer la séparation des clusters.
+plot(inertie[1:50], type = "s", xlab = "Nombre de classes", ylab = "Inertie") # Visualise les 50 premiers niveaux d'inertie pour aider à identifier le nombre optimal de clusters à retenir. Le type "s" crée un graphique en escalier, qui aide à visualiser clairement les sauts d'inertie.
+# La hauteur de l'arbre représente l'inertie
+
+## saut d'inertie à k = 7
+k_sel <- 9
+points(k_sel, inertie[k_sel], col = "blue") # Marque le point sur le graphique où le saut d'inertie à k = 7 est observé. Ceci est sélectionné comme le nombre optimal de clusters. Nombre de cluster = 7
+
+# ## saut d'inertie à k = 10
+# k_sel <- 10
+# points(k_sel, inertie[k_sel], col = "blue") # Marque le point sur le graphique où le saut d'inertie à k = 10 est observé. Ceci est sélectionné comme le nombre optimal de clusters. Nombre de cluster = 10
+
+factoextra::fviz_dend(arbre, k = k_sel, show_labels = FALSE, rect = TRUE) #On crée l'arbre (avec des rectangles délimitants et sans labels)
+
+cluster_factor <- cutree(arbre, k_sel) # Récupere dans typo les différent cluster à k = 7
+dd5_bis_narm$cluster_factor <- factor(cluster_factor) # Rajoute la colonne typo à d_cyto_narm
+
+
+metadata <- 
+  dd5_bis_narm %>% 
+  select(sample = num_inclusion, organ, sexe, age, cluster_factor) %>%
+  filter(!is.na(organ)) %>%
+  rename(group = organ)
+
+# samples_metadata(MOFAobject.trained) <- metadata # On donne ces metadata à l'objet MOFA
+
+
+set.seed(42)
+MOFAobject.trained <- run_tsne(MOFAobject.trained)
+
+
+d_TSNE <- MOFAobject.trained@dim_red$TSNE
+dd6_bis <- left_join(dd5_bis_narm, d_TSNE, by = c("num_inclusion" = "sample"))
+
+library(paletteer)
+# mycolor <- ggsci::pal_npg("nrc")(7)
+mycolor <- c(
+  "#FF0000",  # Rouge
+  "#00FF00",  # Vert
+  "#0000FF",  # Bleu
+  "#FFFF00",  # Jaune
+  "#FF00FF",  # Magenta
+  "#00FFFF",  # Cyan
+  "#800000",  # Marron
+  "#808000",  # Olive
+  "#008000",  # Vert foncé
+  "#800080",  # Violet foncé
+  "#008080",  # Sarcelle
+  "#000080",  # Bleu marine
+  "#FFA500",  # Orange
+  "#A52A2A"   # Brun
+)
+
+# mycolor <- brewer.pal(11, "Set1")
+# mycolor_bis <- c("red", "blue", "green", "purple", "grey", "black", "yellow", "orange", "maroon", "darkgreen")
+
+
+dd6_bis %>% 
+  ggplot(aes(x = TSNE1, y = TSNE2, color = cluster_factor)) + 
+  geom_point() + 
+  scale_color_manual(values = mycolor) +
+  # facet_wrap(vars(organ)) +
+  theme_bw() 
+
+dd6_bis %>% 
+  ggplot(aes(x = TSNE1, y = TSNE2, color = cluster_factor)) + 
+  geom_point() + 
+  scale_color_manual(values = mycolor) +
+  facet_wrap(vars(organ)) +
+  theme_bw() 
+
+# 
+# TSNE <- plot_dimred(MOFAobject.trained,
+#   method = "TSNE",
+#   color_by = "cluster_factor",
+#   dot_size = 3)
+# 
+# TSNE + scale_fill_manual(values = mycolor)
+#   
+
+
+
+
+
+
+MOFAobject.trained <- run_umap(MOFAobject.trained, min_dist = 0.01, n_neighbors = 10)
+
+d_UMAP <- MOFAobject.trained@dim_red$UMAP
+dd6_bis <- left_join(dd6_bis, d_UMAP, by = c("num_inclusion" = "sample"))
+
+dd6_bis %>% 
+  ggplot(aes(x = UMAP1, y = UMAP2, color = cluster_factor)) + 
+  geom_point() + 
+  scale_color_manual(values = mycolor) +
+  # facet_wrap(vars(organ)) +
+  theme_bw() 
+
+dd6_bis %>% 
+  ggplot(aes(x = UMAP1, y = UMAP2, color = cluster_factor)) + 
+  geom_point() + 
+  scale_color_manual(values = mycolor) +
+  facet_wrap(vars(organ)) +
+  theme_bw() 
+
+# plot_dimred(MOFAobject.trained, method="UMAP", color_by = "cluster_factor", dot_size = 3) + scale_fill_manual(values = mycolor)
+
+table_contingence <- as.data.frame(table(dd6_bis$organ, dd6_bis$cluster_factor))
+table_contingence
+
+ggplot(table_contingence, aes(x = Var1, y = Freq, fill = Var2)) +
+  geom_bar(stat = "identity") +
+  # coord_polar("y", start=0) +
+  labs(x = "Organ", y = "Frequency", fill = "Cluster Factor") +
+  theme_minimal() +
+  scale_fill_manual(values = mycolor)
+
+
+ggplot(table_contingence, aes(x = Var1, y = Freq, fill = Var2)) +
+  geom_bar(stat = "identity") +
+  coord_polar("y", start=0) +
+  labs(x = "Organ", y = "Frequency", fill = "Cluster Factor") +
+  theme_minimal() +  
+  scale_fill_manual(values = mycolor)
+
+
+
+
+# Calcul des pourcentages
+table_contingence$Percentage <- with(table_contingence, Freq / sum(Freq) * 100)
+
+ggplot(table_contingence, aes(x = Var1, y = Percentage, fill = Var2)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Organ", y = "Percentage", fill = "Cluster Factor") +
+  theme_minimal() +
+  scale_fill_manual(values = mycolor) +
+  ggtitle("Pourcentage des Clusters par Organ")
+
+ggplot(table_contingence, aes(x = Var1, y = Percentage, fill = Var2)) +
+  geom_bar(stat = "identity") +
+  coord_polar("y", start=0) +
+  labs(x = "Organ", y = "Percentage", fill = "Cluster Factor") +
+  theme_minimal() +
+  scale_fill_manual(values = mycolor)
+
+dd6_bis %>% 
+  ggplot(aes(x = organ, fill = cluster_factor)) + 
+  geom_bar(position = "stack")
+
+n_by_organ <- dd6_bis %>% 
+  group_by(organ) %>% 
+  summarise(effectif_tot = n()) 
+
+tab <- dd6_bis %>% 
+  group_by(organ, cluster_factor) %>% 
+  summarise(effectif = n()) %>% 
+  left_join(n_by_organ) %>% 
+  mutate("pct_by_organ" = effectif/effectif_tot)
+
+tab %>% 
+  ggplot(aes(x = organ, y = pct_by_organ, fill = cluster_factor)) + 
+  geom_bar(stat = "identity", position = "stack") + 
+  coord_flip()
+
+tab %>% 
+  ggplot(aes(x = cluster_factor, y = pct_by_organ, fill = cluster_factor)) + 
+  geom_bar(stat = "identity", position = position_dodge()) + 
+  coord_flip()+
+  facet_wrap(vars(organ))
+
+tab %>% 
+  ggplot(aes(x = organ, y = pct_by_organ, fill = cluster_factor)) + 
+  geom_bar(stat = "identity", position = position_dodge()) + 
+  coord_flip()+
+  facet_wrap(vars(cluster_factor))
+
+
+tab2 <- dd6_bis %>% 
+  group_by(cluster_factor) %>% 
+  summarise(LF1 = mean(LF1),
+            LF2 = mean(LF2),
+            LF3 = mean(LF3),
+            LF4 = mean(LF4),
+            LF5 = mean(LF5),
+            LF6 = mean(LF6),
+            LF7 = mean(LF7),
+            LF8 = mean(LF8),
+            LF9 = mean(LF9),
+            LF10 = mean(LF10)) %>% 
+  tidyr::pivot_longer(cols = starts_with("LF"), names_to = "LF", values_to = "mean")
+
+tab2 %>% 
+  ggplot(aes(x = mean, y = LF, fill = cluster_factor)) + 
+  geom_bar(stat = "identity", position = position_dodge()) + 
+  coord_flip()+
+  facet_wrap(vars(cluster_factor))
+
+
+tab2 %>% 
+  ggplot(aes(x = LF, y = mean, color = cluster_factor)) + 
+  geom_point(size = 2) + 
+  geom_line(aes(group = cluster_factor)) + 
+  facet_wrap(vars(cluster_factor))
+
+
+```
+
+```{r MOFA test en imposant 10 facteurs latents au lieu de 15}
+
+
+long_df_immuno <- 
+  dd4 %>% # On prend toutes nos données
+  select(num_inclusion, all_of(names(dd4)[7:37])) %>%  # On ne garde que la colonne "num_inclusion" et les colonnes immuno_pop_totales (col 7 à 37)
+  tidyr::pivot_longer(cols = !num_inclusion, names_to = "feature", values_to = "value") %>% # Fait format long du dataframe en répétant les features pour chaque num_inclusion  
+  mutate(view = "I") %>% # On rajoute une colonne "view" qui prend la valeur "I" pour toutes les lignes (I = Immuno)
+  left_join(dd4 %>% select(num_inclusion, organ), by = "num_inclusion") %>% # On rajoute la colonne "organ" correspondant au type de cancer pour chaque num_inclusion
+  rename(sample = num_inclusion, group = organ) %>% # On renomme les colonnes de façon à être conforme avec MOFA
+  mutate(value = log10((value * 1000000 + 1) )) # +1 pour enlever les 0 et 10⁶ pour les unité de cytométrie à vérifier
+
+################################################################################
+### Visualisation de l'effet de passer en log pour avoir une belle Gaussienne
+png("combined_image.png", width = 1600, height = 800)
+par(mfrow = c(1, 2))
+
+# Sans le log : 
+Sans_Log <- hist(dd5$NK,
+          xlab = "Values",
+          ylab = "Fréquence",
+          main = "Histogramme des valeurs des NK\nsans log transformation")
+
+# Avec le log :
+Avec_Log <- hist(log10(dd5$NK * 1000000 +1),
+          xlab = "Log(Values)",
+          ylab = "Fréquence",
+          main = "Histogramme des valeurs des NK\navec log transformation")
+
+dev.off()
+################################################################################
+
+
+
+matrix_missense <- 
+  dd4 %>% # On prend toutes nos données
+  select(num_inclusion, all_of(names(dd4)[147:239]))  # On ne garde que la colonne "num_inclusion" et les colonnes de mutation missense (col 147 à 239)
+
+# On enleve les gènes qui ont bien trop de NA
+nbNA_gene <- colSums(is.na(matrix_missense)) # On fait le total des NA pur chaque colonne
+table(nbNA_gene) # Affiche le nombre de NA par colonne (par gène)
+matrix_missense_narm <- matrix_missense[ , nbNA_gene < 273] # On enleve les 23 gènes qui on plus de 319 NA (trop de données manquantes (> 25%))
+
+long_df_missense <- 
+  matrix_missense_narm %>% # On prend la matrice de mutation missense nettoyé des gènes avec trop de NA
+  tidyr::pivot_longer(cols = !num_inclusion, names_to = "feature", values_to = "value") %>% # Fait format long du dataframe en répétant les features pour chaque num_inclusion  
+  mutate(view = "G") %>% # On rajoute une colonne "view" qui prend la valeur "G" pour toutes les lignes (G = Génomique)
+  left_join(dd4 %>% select(num_inclusion, organ), by = "num_inclusion") %>% # On rajoute la colonne "organ" correspondant au type de cancer pour chaque num_inclusion
+  rename(sample = num_inclusion, group = organ) # On renomme les colonnes de façon à être conforme avec MOFA
+
+
+
+matrix_cnv <- 
+  dd4 %>% # On prend toutes nos données
+  select(num_inclusion, all_of(names(dd4)[240:332]))  # On ne garde que la colonne "num_inclusion" et les colonnes de mutation cnv (col 240 à 332)
+
+# On enleve les gènes qui ont bien trop de NA
+nbNA_gene <- colSums(is.na(matrix_cnv)) # On fait le total des NA pur chaque colonne
+table(nbNA_gene) # Affiche le nombre de NA par colonne (par gène)
+# On a pas de gène qui à beaucoup de NA par contre il y a des certains individus qui n'ont pas de données, on va donc les enlever
+
+nbNA_ind <- apply(matrix_cnv, 1, FUN = function(x) sum(is.na(x))) # On compte le nombre de valeur manquante NA (on regarde la somme) pour chaque ligne (patients) et on stocke ça dans un vecteur
+table(nbNA_ind) # On regarde ce vecteur (Il y a 167 patients avec des lignes contenant des 93 NA sur les 94 variables !!! On va les enlever)
+matrix_cnv_narm <- matrix_cnv[nbNA_ind < 93,] # On sélectionne que les ligne du vecteur (les patients) qui ont une somme de NA inférieu à 93 NA
+
+
+long_df_cnv <- 
+  matrix_cnv_narm %>% # On prend la matrice de mutation cnv nettoyé des individus avec trop de NA
+  tidyr::pivot_longer(cols = !num_inclusion, names_to = "feature", values_to = "value") %>% # Fait le format long du dataframe en répétant les features pour chaque num_inclusion  
+  mutate(view = "G") %>% # On rajoute une colonne "view" qui prend la valeur "G" pour toutes les lignes (G = Génomique)
+  left_join(dd4 %>% select(num_inclusion, organ), by = "num_inclusion") %>% # On rajoute la colonne "organ" correspondant au type de cancer pour chaque num_inclusion
+  rename(sample = num_inclusion, group = organ) %>% # On renomme les colonnes de façon à être conforme avec MOFA
+  mutate(value = replace(value, value == -1, 1)) # On remplace les -1 en 1 pour avoir quelque chose binaire mais on perd l'information -1 = délétion et 1 = amplification
+
+
+
+
+
+
+
+
+
+# On est obligé de clean les noms sinon MOFA pas content
+clean_names <- function(names) {
+  names <- gsub("é", "e", names)
+  names <- gsub("è", "e", names)
+  names <- gsub("_", "", names)
+  names <- gsub("\\+", "Plus", names)
+  names <- gsub("-", "Minus", names)
+  names <- gsub(" ", "", names)
+  names <- iconv(names, to="ASCII//TRANSLIT")
+  return(names)
+}
+
+# unique(long_df_combined$feature) # Vérifier que les noms ont été changés
+
+
+
+long_df_combined <- 
+  rbind(long_df_immuno, long_df_missense, long_df_cnv) %>% # On combine les 3 longs data_frame
+  filter(!is.na(group)) # On filtre les "organ" (group) pour lequels on des NA (9 ptients) sinon cela pose problème
+  
+
+long_df_combined$feature <- clean_names(long_df_combined$feature) # Applique la fonction de nettoyage aux noms de features + autres colonnes
+str(long_df_combined) # On vérifie le long data frame combiné
+
+groups <- long_df_combined$group # On stocke les groupe dans un vecteur
+
+
+
+MOFAobject <- create_mofa(long_df_combined, groups = groups) # On crée l'objet MOFA
+print(MOFAobject) # On a un récap de l'objet
+
+plot_data_overview(MOFAobject) # On regarde les différentes views de l'objet
+
+
+data_opts <- get_default_data_options(MOFAobject)
+data_opts$scale_views <- TRUE # On scale les views
+data_opts$scale_groups <- TRUE # On scale les groupes
+head(data_opts)
+
+
+model_opts <- get_default_model_options(MOFAobject)
+model_opts$likelihoods$G <- "bernoulli" # On a des données binaires donc Bernouilli
+model_opts$likelihoods$I <- "gaussian" # ON a des données continues donc Gauss
+model_opts$num_factors <- 5
+head(model_opts)
+
+
+train_opts <- get_default_training_options(MOFAobject)
+head(train_opts)
+
+# On prepare l'objet MOFA
+MOFAobject <- prepare_mofa(object = MOFAobject,
+                           data_options = data_opts,
+                           model_options = model_opts,
+                           training_options = train_opts)
+
+outfile = file.path(getwd(),"model.hdf5")
+
+
+# On entraine le modèle
+MOFAobject.trained <- run_mofa(MOFAobject, outfile, use_basilisk = TRUE)
+
+
+samples_metadata(MOFAobject.trained) <- metadata # On donne ces metadata à l'objet MOFA
+
+plot_factor_cor(MOFAobject.trained) # On regarde la corrélation entre les différents facteurs
+
+plot_variance_explained(MOFAobject.trained, 
+                        x = "view",
+                        y = "factor",
+                        split_by = "group",
+                        plot_total = TRUE,
+                        factors = "all",
+                        min_r2 = 0,
+                        max_r2 = 15,
+                        legend = TRUE,
+                        use_cache = TRUE)
+
+
+# ON regarde les poids de chaque feature dans les facteurs qui expliques le plus la variance dans les view génomique et immuno
+plot_weights(MOFAobject.trained,
+             view = "G",
+             factor = 1,
+             nfeatures = 10,     # Top number of features to highlight
+             scale = T)           # Scale weights from -1 to 1
+
+plot_top_weights(MOFAobject.trained,
+                 view = "G",
+                 factor = 1,
+                 nfeatures = 10,     # Top number of features to highlight
+                 abs = FALSE,
+                 scale = T,
+                 sign = "all")           # Scale weights from -1 to 1
+
+# On fait des heatmeaps
+plot_data_heatmap(MOFAobject.trained,
+                  view = "G",         # view of interest
+                  factor = 1,             # factor of interest
+                  features = 25,          # number of features to plot (they are selected by weight)
+                  groups = "all",
+                  scale = "row",
+                  cluster_rows = TRUE, 
+                  cluster_cols = TRUE,
+                  show_rownames = TRUE, 
+                  show_colnames = FALSE)
+
+################################################### Caractérisation du facteur 2
+
+plot_weights(MOFAobject.trained,
+             view = "I",
+             factor = 2,
+             nfeatures = 10,     # Top number of features to highlight
+             scale = T)
+
+plot_top_weights(MOFAobject.trained,
+                 view = "I",
+                 factor = 2,
+                 nfeatures = 10,     # Top number of features to highlight
+                 abs = FALSE,
+                 scale = T,
+                 sign = "all")           # Scale weights from -1 to 1
+
+plot_data_heatmap(MOFAobject.trained, 
+                  view = "I",
+                  factor = 2,  
+                  features = 25,
+                  groups = "all",
+                  cluster_rows = TRUE, 
+                  cluster_cols = TRUE,
+                  show_rownames = TRUE, 
+                  show_colnames = FALSE,
+                  scale = "row")
+
+```
