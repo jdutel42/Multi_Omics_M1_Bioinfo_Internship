@@ -113,8 +113,8 @@ Key references include:
 
 ```
 .
-├── scripts/               # R scripts for analysis (MOFA, clustering, plots)
+├── scripts/               # Rmd scripts for analysis (MOFA, clustering, plots)
 ├── results/               # Figures and model outputs
-├── report/                # Internship report and documentation
+├── reports/               # Internship reports (thesis & defense)
 └── README.md              # Project description
 ```
